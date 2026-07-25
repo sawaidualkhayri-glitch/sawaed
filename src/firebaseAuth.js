@@ -8,10 +8,10 @@ import {
   sendEmailVerification
 } from "firebase/auth";
 import { auth, db } from "./firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // 1. تسجيل حساب جديد بالإيميل وباسورد
-export const signUpWithEmail = async (email, password, fullName) => {
+export const signUpWithEmail = async (email, password, fullName, extraProfile = {}) => {
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
   const user = userCredential.user;
   const safeFullName = (fullName || "مستخدم").trim() || "مستخدم";
@@ -25,10 +25,12 @@ export const signUpWithEmail = async (email, password, fullName) => {
     uid: user.uid,
     fullName: safeFullName,
     displayName: safeFullName,
+    username: safeFullName,
     email: email,
     role: "user",
     createdAt: serverTimestamp(),
     emailVerified: false,
+    ...extraProfile,
   }, { merge: true });
 
   return user;
@@ -55,8 +57,9 @@ export const loginWithGoogle = async () => {
   const result = await signInWithPopup(auth, provider);
   const user = result.user;
 
-  // حفظ/تحديث بيانات المستخدم في Firestore
-  await setDoc(doc(db, "users", user.uid), {
+  const userRef = doc(db, "users", user.uid);
+  const snap = await getDoc(userRef);
+  const profileData = {
     uid: user.uid,
     fullName: user.displayName || "مستخدم",
     displayName: user.displayName || "مستخدم",
@@ -64,7 +67,23 @@ export const loginWithGoogle = async () => {
     photoURL: user.photoURL,
     lastLogin: serverTimestamp(),
     emailVerified: user.emailVerified,
-  }, { merge: true });
+  };
+
+  if (!snap.exists()) {
+    await setDoc(userRef, {
+      ...profileData,
+      role: "user",
+      grade: "",
+      branch: "",
+      stream: "",
+      progress: {},
+      savedItems: [],
+      pinnedNews: [],
+      createdAt: serverTimestamp(),
+    });
+  } else {
+    await setDoc(userRef, profileData, { merge: true });
+  }
 
   return user;
 };

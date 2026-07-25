@@ -119,3 +119,29 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* Ensure native select dropdowns (options) match the app theme */
+select, select:focus {
+  background-color: var(--bg);
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
+/* Many browsers use native UI for option list; set options explicitly */
+select option {
+  background-color: var(--bg);
+  color: var(--text-h);
+}
+
+/* Explicit classes in case app toggles a theme class on <html> */
+.light select,
+.light select option {
+  background-color: #ffffff;
+  color: #1e1b3a;
+}
+
+.dark select,
+.dark select option {
+  background-color: #1e1b3a;
+  color: #ffffff;
+}

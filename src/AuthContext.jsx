@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -23,6 +24,7 @@ function buildUserProfile(firebaseUser, profile = {}) {
     nickname: profile.nickname || displayName,
     grade: profile.grade || "",
     branch: profile.branch || "",
+    stream: profile.stream || profile.branch || "",
     progress: profile.progress || {},
     savedItems: profile.savedItems || [],
     pinnedNews: profile.pinnedNews || [],
@@ -50,11 +52,14 @@ export function AuthProvider({ children }) {
           const cachedFromIdb = await getCachedJson("sawaed_user_profile");
           if (cachedFromIdb && mounted) setCurrentUser(cachedFromIdb);
         }
-      } catch {
+      } catch (error) {
+        console.warn("Failed to restore cached session:", error);
         try {
           const cachedFromIdb = await getCachedJson("sawaed_user_profile");
           if (cachedFromIdb && mounted) setCurrentUser(cachedFromIdb);
-        } catch {}
+        } catch (innerError) {
+          console.warn("Failed to read cached profile from IndexedDB:", innerError);
+        }
       }
     };
 
@@ -80,22 +85,55 @@ export function AuthProvider({ children }) {
         }
 
         setCurrentUser(null);
-        try { localStorage.removeItem("sawaed_user"); } catch {}
+        try { localStorage.removeItem("sawaed_user"); } catch (error) { console.warn("Failed to remove cached user:", error); }
         setAuthLoading(false);
         return;
       }
 
       try {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        const profile = snap.exists() ? snap.data() : {};
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+        let profile = snap.exists() ? snap.data() : null;
+
+        if (!profile) {
+          profile = {
+            uid: user.uid,
+            fullName: user.displayName || "مستخدم",
+            displayName: user.displayName || "مستخدم",
+            username: user.displayName || "مستخدم",
+            nickname: user.displayName || "مستخدم",
+            email: user.email || "",
+            role: "user",
+            grade: "",
+            branch: "",
+            stream: "",
+            progress: {},
+            savedItems: [],
+            pinnedNews: [],
+            emailVerified: user.emailVerified,
+            createdAt: serverTimestamp(),
+            lastLogin: serverTimestamp(),
+          };
+          await setDoc(userRef, profile);
+        } else {
+          const updateData = {};
+          if (!profile.role) updateData.role = "user";
+          if (!profile.stream && profile.branch) updateData.stream = profile.branch;
+          if (Object.keys(updateData).length > 0) {
+            await setDoc(userRef, updateData, { merge: true });
+            profile = { ...profile, ...updateData };
+          }
+        }
+
         const safeUser = buildUserProfile(user, profile);
         setCurrentUser(safeUser);
-        try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch {}
-        try { await cacheJson("sawaed_user_profile", safeUser); } catch {}
-      } catch {
+        try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch (error) { console.warn("Failed to cache user locally:", error); }
+        try { await cacheJson("sawaed_user_profile", safeUser); } catch (error) { console.warn("Failed to cache user profile in IndexedDB:", error); }
+      } catch (error) {
+        console.warn("Failed to load Firestore profile:", error);
         const fallback = buildUserProfile(user, {});
         setCurrentUser(fallback);
-        try { localStorage.setItem("sawaed_user", JSON.stringify(fallback)); } catch {}
+        try { localStorage.setItem("sawaed_user", JSON.stringify(fallback)); } catch (cacheError) { console.warn("Failed to cache fallback user locally:", cacheError); }
       }
 
       if (mounted) setAuthLoading(false);
@@ -113,8 +151,8 @@ export function AuthProvider({ children }) {
   const updateUserProfile = useCallback(async (data) => {
     const updated = { ...(currentUser || {}), ...data, updatedAt: new Date().toISOString() };
     setCurrentUser(updated);
-    try { localStorage.setItem("sawaed_user", JSON.stringify(updated)); } catch {}
-    try { await cacheJson("sawaed_user_profile", updated); } catch {}
+    try { localStorage.setItem("sawaed_user", JSON.stringify(updated)); } catch (error) { console.warn("Failed to cache updated user locally:", error); }
+    try { await cacheJson("sawaed_user_profile", updated); } catch (error) { console.warn("Failed to cache updated user profile in IndexedDB:", error); }
 
     if (!firebaseUser) return updated;
 
@@ -130,10 +168,10 @@ export function AuthProvider({ children }) {
 
     const localKeys = ["sawaed_user", "sawaed_user_selection", "cached_profile"];
     for (const key of localKeys) {
-      try { localStorage.removeItem(key); } catch {}
+      try { localStorage.removeItem(key); } catch (error) { console.warn(`Failed to remove local key ${key}:`, error); }
     }
 
-    try { await clearCachedJson("sawaed_user_profile"); } catch {}
+    try { await clearCachedJson("sawaed_user_profile"); } catch (error) { console.warn("Failed to clear cached user profile:", error); }
   }, []);
 
   return (

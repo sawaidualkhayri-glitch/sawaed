@@ -85,21 +85,21 @@ export async function clearCachedBlob(key) {
   return clearCachedJson(key);
 }
 
-export const checkIsFileCached = async (fileId) => {
+export const checkIsFileCached = async (itemId) => {
   if (!("caches" in window)) return false;
-  const cacheKey = `/offline-files/${fileId}`;
+  const cacheKey = `/offline-files/${itemId}`;
   const match = await caches.match(cacheKey);
   return !!match;
 };
 
-export const saveFileForOffline = (fileId) => {
+export const saveFileForOffline = (itemId) => {
   return new Promise((resolve, reject) => {
     if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
       return reject(new Error("الـ Service Worker غير نشط حالياً"));
     }
 
-    const targetUrl = `${WORKER_URL}/?fileId=${fileId}`;
-    const cacheKey = `/offline-files/${fileId}`;
+    const targetUrl = `${WORKER_URL}?fileId=${itemId}`;
+    const cacheKey = `/offline-files/${itemId}`;
     const channel = new MessageChannel();
 
     channel.port1.onmessage = (event) => {
@@ -114,13 +114,13 @@ export const saveFileForOffline = (fileId) => {
   });
 };
 
-export const removeFileFromOffline = (fileId) => {
+export const removeFileFromOffline = (itemId) => {
   return new Promise((resolve) => {
     if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
       return resolve(false);
     }
 
-    const cacheKey = `/offline-files/${fileId}`;
+    const cacheKey = `/offline-files/${itemId}`;
     const channel = new MessageChannel();
 
     channel.port1.onmessage = (event) => resolve(!!event.data?.success);
@@ -132,8 +132,8 @@ export const removeFileFromOffline = (fileId) => {
   });
 };
 
-export const openOfflineFile = async (fileId) => {
-  const cacheKey = `/offline-files/${fileId}`;
+export const openOfflineFile = async (itemId) => {
+  const cacheKey = `/offline-files/${itemId}`;
   const cachedResponse = await caches.match(cacheKey);
 
   if (cachedResponse) {
@@ -141,6 +141,6 @@ export const openOfflineFile = async (fileId) => {
     const fileUrl = URL.createObjectURL(blob);
     window.open(fileUrl, "_blank");
   } else {
-    window.open(`${WORKER_URL}/?fileId=${fileId}`, "_blank");
+    window.open(`${WORKER_URL}?fileId=${itemId}`, "_blank");
   }
 };

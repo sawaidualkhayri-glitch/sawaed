@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
+import { pdfjs } from "react-pdf";
 import confetti from "canvas-confetti";
+import PDFViewer from "./PDFViewer.jsx";
+import { useAuth } from "./AuthContext.jsx";
+import { loginWithEmail, signUpWithEmail, loginWithGoogle } from "./firebaseAuth";
 
 // Use a locally served pdf.worker to guarantee offline rendering in the PWA.
 // Place a copy of the pdf.worker script at `public/pdf.worker.min.js` (from pdfjs-dist)
@@ -25,6 +28,34 @@ class ErrorBoundary extends React.Component {
     }
     return this.props.children;
   }
+}
+
+function Modal({ open, title, children, footer, onClose }) {
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10, 10, 20, 0.75)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: "20px" }} onClick={onClose}>
+      <div style={{ width: "100%", maxWidth: "520px", background: "rgba(12, 12, 30, 0.96)", border: "1px solid rgba(124,115,245,0.32)", borderRadius: "24px", boxShadow: "0 28px 80px rgba(0,0,0,0.35)", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "18px 22px 8px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0, color: "#fff", fontSize: "18px", fontWeight: "800" }}>{title}</h3>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", color: "#ccc", fontSize: "20px", cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: "18px 22px 24px" }}>
+          {children}
+        </div>
+        {footer ? <div style={{ padding: "0 22px 20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>{footer}</div> : null}
+      </div>
+    </div>
+  );
 }
 
 // ============================================================
@@ -120,7 +151,7 @@ function extractDriveId(url) {
 // بدلاً من التمدد حافة لحافة أو البقاء بعرض هاتف ثابت
 const APP_MAX_WIDTH = "1200px";
 
-const CF_WORKER_URL = "https://files.sawaidualkhayri.workers.dev/";
+const CF_WORKER_URL = "https://sawaed.hamodemsg.workers.dev/";
 
 function driveDownloadUrl(url) {
   const id = extractDriveId(url);
@@ -173,6 +204,12 @@ function getOfflineFileId(inputUrl) {
   } catch {
     return String(inputUrl || "file").replace(/[^a-zA-Z0-9]/g, "").slice(0, 80);
   }
+}
+
+function getOfflineItemId(item) {
+  if (!item) return getOfflineFileId("");
+  if (item.id) return item.id;
+  return getOfflineFileId(item.url || item.title || item.name || item.description || "");
 }
 
 function getFileMimeType(resource = {}, blob) {
@@ -327,6 +364,11 @@ function pushNav(id) {
 
 function popNav() {
   navStack.pop();
+}
+
+function resetNav() {
+  navStack.length = 0;
+  window.history.pushState({ sawaed: true }, "");
 }
 
 // ============================================================
@@ -619,19 +661,63 @@ export default function App() {
   const [config, setConfig] = useState(() => ls("sawaed_config", DEFAULT_CONFIG));
   const [darkMode, setDarkMode] = useState(() => ls("sawaed_dark", false));
   const [page, setPage] = useState("loading");
-  const [currentUser, setCurrentUser] = useState(() => ls("sawaed_user", null));
+  const { currentUser, authLoading, logout: authLogout, updateUserProfile } = useAuth();
   const [activePage, setActivePage] = useState("home");
   const [quoteIdx, setQuoteIdx] = useState(0);
   const [flame, setFlame] = useState(() => initFlame());
+  const needsOnboarding = (user) => !!user && (!user.grade || !user.branch);
+  const openAdminPanel = () => setPage("admin");
+  const handleOnboardingComplete = () => setPage("main");
   const [subjectNav, setSubjectNav] = useState(null);
   const [folderNav, setFolderNav] = useState(null);
   const [foundNav, setFoundNav] = useState(null);
   const [newsDetail, setNewsDetail] = useState(null);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [isEditorSession, setIsEditorSession] = useState(false);
-
   const T = darkMode ? DARK : LIGHT;
+
+  // Sync a theme class on the document element so native widgets (select/options) can be themed via CSS
+  useEffect(() => {
+    try {
+      const el = document.documentElement;
+      el.classList.remove("light", "dark");
+      el.classList.add(darkMode ? "dark" : "light");
+    } catch (e) {
+      // ignore (e.g., during SSR or non-browser env)
+    }
+  }, [darkMode]);
+
+  const logout = async () => {
+    // Immediately reset UI to welcome/landing before attempting sign-out
+    setPage("welcome");
+    setActivePage("home");
+    setSubjectNav(null);
+    setFolderNav(null);
+    setFoundNav(null);
+    setNewsDetail(null);
+    resetNav();
+    try {
+      await authLogout();
+      // after successful sign-out, ensure app shows landing
+      setPage(config.splashEnabled ? "splash" : "register");
+    } catch (err) {
+      console.error("Logout error:", err);
+    }
+  };
+
+  // Global auth guard: if auth finished loading and there's no user, force landing/welcome
+  useEffect(() => {
+    if (!authLoading && !currentUser) {
+      // preserve a stable UI state to avoid rendering protected pages
+      setPage("welcome");
+      setActivePage("home");
+      setSubjectNav(null);
+      setFolderNav(null);
+      setFoundNav(null);
+      setNewsDetail(null);
+      resetNav();
+    }
+  }, [authLoading, currentUser]);
 
   // ============================================================
   // تصحيح البيانات إذا كانت مفقودة أو فاسدة
@@ -795,7 +881,7 @@ export default function App() {
     if (subjectNav) { setSubjectNav(null); popNav(); return; }
     if (foundNav) { setFoundNav(null); popNav(); return; }
     if (newsDetail) { setNewsDetail(null); popNav(); return; }
-    if (page === "admin") { setIsEditorSession(false); setPage(currentUser ? "main" : "register"); popNav(); return; }
+    if (page === "admin") { setPage(currentUser ? "main" : "register"); popNav(); return; }
     if (activePage !== "home" && page === "main") {
       setActivePage("home");
     }
@@ -830,14 +916,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!configLoaded) return;
+    if (!configLoaded || authLoading) return;
     if (currentUser) {
       const { streak } = calcFlame();
       setFlame(streak);
-      setPage("main");
-    } else if (!config.splashEnabled) setPage("register");
-    else setPage("splash");
-  }, [configLoaded]);
+      if (needsOnboarding(currentUser)) {
+        setPage("onboarding");
+      } else {
+        setPage("main");
+      }
+    } else {
+      setPage(config.splashEnabled ? "splash" : "register");
+      setActivePage("home");
+      setSubjectNav(null);
+      setFolderNav(null);
+      setFoundNav(null);
+      setNewsDetail(null);
+    }
+  }, [configLoaded, authLoading, currentUser, config.splashEnabled]);
 
   useEffect(() => {
     if (config.motivationalFixed || !config.motivationalQuotes?.length) return;
@@ -856,46 +952,30 @@ export default function App() {
     await fbSet("app_config", "main", flat);
   };
 
-  const login = (user) => {
-    setCurrentUser(user);
-    lsSet("sawaed_user", user);
-    const { streak } = calcFlame();
-    setFlame(streak);
-    setPage("main");
-  };
-
-  const logout = () => {
-    setCurrentUser(null);
-    lsSet("sawaed_user", null);
-    setIsEditorSession(false);
-    setPage("splash");
-  };
-
   const updateUser = async (data) => {
-    const updated = { ...currentUser, ...data };
-    setCurrentUser(updated);
-    lsSet("sawaed_user", updated);
-    await fbSet("users", updated.id || updated.username, updated);
+    return await updateUserProfile(data);
   };
 
   const openSubject = (data) => { pushNav("subject"); setSubjectNav(data); };
   const openFolder = (data) => { pushNav("folder"); setFolderNav(data); };
   const openFound = (data) => { pushNav("found"); setFoundNav(data); };
   const openNews = (data) => { pushNav("news"); setNewsDetail(data); };
-  const [editorRole, setEditorRole] = useState(null);
-  const [editorPermissions, setEditorPermissions] = useState(null);
-  const [editorUsername, setEditorUsername] = useState(null);
   const [showTimerModal, setShowTimerModal] = useState(false);
-  const openAdmin = (role, permissions, uname) => { pushNav("admin"); setIsEditorSession(true); setEditorRole(role || "all"); setEditorPermissions(permissions || null); setEditorUsername(uname || null); setPage("admin"); };
 
   const quote = config.motivationalFixed ? config.motivationalQuotes?.[0] : config.motivationalQuotes?.[quoteIdx];
 
-  if (page === "loading") return <LoadingScreen T={T} />;
+  if (page === "loading" || authLoading || !configLoaded) return <LoadingScreen T={T} />;
   if (page === "splash") return <SplashPage config={config} T={T} onNext={() => setPage("register")} />;
-  if (page === "register") return <RegisterPage config={config} T={T} darkMode={darkMode} onLogin={login} onAdmin={openAdmin} />;
-  if (page === "admin") return <AdminPanel config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} editorRole={editorRole} editorPermissions={editorPermissions} onBack={() => { setIsEditorSession(false); setPage(currentUser ? "main" : "register"); popNav(); }} />;
-  if (folderNav) return <FolderPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} data={folderNav} onBack={() => { setFolderNav(null); popNav(); }} isEditorSession={isEditorSession} editorRole={editorRole} editorPermissions={editorPermissions} />;
-  if (subjectNav) return <SubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} subject={subjectNav} onBack={() => { setSubjectNav(null); popNav(); }} isEditorSession={isEditorSession} editorRole={editorRole} onOpenFolder={openFolder} />;
+  if (page === "register") return <RegisterPage config={config} T={T} darkMode={darkMode} />;
+  if (page === "onboarding") return <OnboardingPage config={config} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} onComplete={handleOnboardingComplete} />;
+  // Prevent protected components from rendering when auth finished and there's no user
+  if (!authLoading && !currentUser) {
+    return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: T.text, padding: 24 }}>جارٍ إعادة التوجيه...</div>;
+  }
+
+  if (page === "admin") return <AdminPanel config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} editorRole={null} editorPermissions={null} onBack={() => { setPage(currentUser ? "main" : "register"); popNav(); }} />;
+  if (folderNav) return <FolderPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} data={folderNav} onBack={() => { setFolderNav(null); popNav(); }} isEditorSession={false} editorRole={null} editorPermissions={null} />;
+  if (subjectNav) return <SubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} subject={subjectNav} onBack={() => { setSubjectNav(null); popNav(); }} isEditorSession={false} editorRole={null} onOpenFolder={openFolder} />;
   if (foundNav) return <FoundationSubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} data={foundNav} onBack={() => { setFoundNav(null); popNav(); }} />;
   if (newsDetail) return <NewsDetailPage T={T} news={newsDetail} currentUser={currentUser} updateUser={updateUser} onBack={() => { setNewsDetail(null); popNav(); }} />;
 
@@ -920,7 +1000,7 @@ export default function App() {
       {activePage === "foundation" && <FoundationPage config={config} T={T} onSubject={openFound} />}
       {activePage === "news" && <NewsPage config={config} saveConfig={saveConfig} T={T} currentUser={currentUser} updateUser={updateUser} onDetail={openNews} />}
       {activePage === "saved" && <SavedPage config={config} T={T} currentUser={currentUser} updateUser={updateUser} />}
-      {activePage === "settings" && <SettingsPage config={config} T={T} darkMode={darkMode} setDarkMode={v => { setDarkMode(v); lsSet("sawaed_dark", v); }} currentUser={currentUser} updateUser={updateUser} logout={logout} onAdmin={openAdmin} onOpenTimer={() => setShowTimerModal(true)} />}
+      {activePage === "settings" && <SettingsPage config={config} T={T} darkMode={darkMode} setDarkMode={v => { setDarkMode(v); lsSet("sawaed_dark", v); }} currentUser={currentUser} updateUser={updateUser} logout={logout} onOpenAdmin={openAdminPanel} onOpenTimer={() => setShowTimerModal(true)} />}
       {!["home", "foundation", "news", "saved", "settings"].includes(activePage) && <CustomPage page={config.navPages?.find(p => p.id === activePage)} T={T} />}
       </div>
       <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, width: "100%", maxWidth: APP_MAX_WIDTH, margin: "0 auto", background: T.navBg, backdropFilter: "blur(20px)", borderTop: `1px solid ${T.cardBorder}`, display: "flex", padding: "6px 0 10px", zIndex: 100 }}> 
@@ -977,16 +1057,6 @@ function SplashPage({ config, T, onNext }) {
 // ============================================================
 
 // hash كلمة السر
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + "sawaed_salt_2024");
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("").substring(0, 32);
-}
-
-// قاعدة اسم المستخدم: حروف إنجليزية وأرقام و _ و . فقط، بدون مسافات أو رموز أخرى (لحسابات الطلاب الجديدة)
-const USERNAME_REGEX = /^[A-Za-z0-9_.]+$/;
 
 // تطبيع اسم المستخدم للمقارنة: يزيل محارف الاتجاه الخفية (RTL/LTR marks) ومسافات Unicode
 // غير القياسية التي قد تُلصق عند النسخ من ملفات Word/PDF، ويوحّد حالة الأحرف والمسافات
@@ -1001,34 +1071,32 @@ function normalizeUsername(s) {
     .toLowerCase();
 }
 
-// تحقق من محرر — يستخدم المقارنة المطبّعة لضمان تسجيل الدخول الصحيح دائماً
-function findEditor(config, username, password) {
-  const editors = config.editors || [];
-  const uname = normalizeUsername(username);
-  return editors.find(e => normalizeUsername(e.username) === uname && e.password === password) || null;
+function formatAuthError(error) {
+  if (!error) return "حدث خطأ غير متوقع. حاول مرة أخرى.";
+  const code = error.code || "";
+  switch (code) {
+    case "auth/invalid-email": return "البريد الإلكتروني غير صالح.";
+    case "auth/user-not-found": return "لا يوجد حساب مرتبط بهذا البريد الإلكتروني.";
+    case "auth/wrong-password": return "كلمة السر غير صحيحة.";
+    case "auth/email-not-verified": return "يرجى تأكيد بريدك الإلكتروني. تم إرسال رابط التحقق.";
+    case "auth/email-already-in-use": return "هذا البريد الإلكتروني مستخدم بالفعل.";
+    case "auth/weak-password": return "كلمة السر ضعيفة. استخدم 6 أحرف على الأقل.";
+    case "auth/popup-closed-by-user": return "تم إغلاق نافذة Google قبل اكتمال الدخول.";
+    default: return error.message || "حدث خطأ. حاول مرة أخرى.";
+  }
 }
 
-function isEditorUsername(config, username) {
-  const uname = normalizeUsername(username);
-  return (config.editors || []).some(e => normalizeUsername(e.username) === uname);
-}
-
-function RegisterPage({ config, T, darkMode, onLogin, onAdmin }) {
-  const savedLogin = ls("sawaed_saved_login", null);
-  const [username, setUsername] = useState(savedLogin?.username || "");
-  const [nickname, setNickname] = useState(savedLogin?.nickname || "");
+function RegisterPage({ config, T, darkMode }) {
+  const [mode, setMode] = useState("start");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPw, setConfirmPw] = useState("");
-  const [grade, setGrade]       = useState(savedLogin?.grade || "");
-  const [branch, setBranch]     = useState(savedLogin?.branch || "");
-  const [rememberMe, setRememberMe] = useState(true);
-  const [showPw, setShowPw]     = useState(false);
-  const [mode, setMode]         = useState("start"); // start|login|register|grade|editor_pw
-  const [existingUser, setExistingUser] = useState(null);
-  const [editorPw, setEditorPw] = useState("");
-  const [err, setErr]           = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [grade, setGrade] = useState(config.grades?.[0] || "");
+  const [branch, setBranch] = useState(config.branches?.[0] || "");
+  const [showPw, setShowPw] = useState(false);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "14px", padding: "14px 16px", fontSize: "16px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
 
@@ -1039,148 +1107,122 @@ function RegisterPage({ config, T, darkMode, onLogin, onAdmin }) {
     </div>
   );
 
-  const checkUsername = async () => {
-    const uname = username.trim();
-    if (!uname) { setErr("أدخل اسم المستخدم"); return; }
-    if (isEditorUsername(config, uname)) { setMode("editor_pw"); setErr(""); return; }
-    setChecking(true); setErr("");
-    const userId = uname.replace(/\s+/g, "_").toLowerCase();
-    const existing = await fbGet("users", userId);
-    setChecking(false);
-    if (existing?.passwordHash) { setExistingUser(existing); setMode("login"); }
-    else { setExistingUser(null); setMode("register"); }
+  const authWithGoogle = async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      await loginWithGoogle();
+    } catch (e) {
+      setErr(formatAuthError(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleEditorLogin = () => {
-    const editor = findEditor(config, username, editorPw);
-    if (!editor) { setErr("كلمة السر غير صحيحة"); return; }
-    lsSet("sawaed_editor_session", { username: editor.username, role: editor.role });
-    onAdmin(editor.role, editor.permissions || null, editor.username);
+  const loginWithEmailPassword = async () => {
+    if (!email.trim()) { setErr("أدخل البريد الإلكتروني."); return; }
+    if (!password) { setErr("أدخل كلمة السر."); return; }
+    setLoading(true);
+    setErr("");
+    try {
+      await loginWithEmail(email.trim(), password);
+    } catch (e) {
+      setErr(formatAuthError(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleLogin = async () => {
-    if (!password) { setErr("أدخل كلمة السر"); return; }
-    setLoading(true); setErr("");
-    const hashed = await hashPassword(password);
-    if (hashed !== existingUser.passwordHash) { setLoading(false); setErr("كلمة السر غير صحيحة"); return; }
-    if (rememberMe) lsSet("sawaed_saved_login", { username: existingUser.username, nickname: existingUser.nickname, grade: existingUser.grade, branch: existingUser.branch });
-    else lsSet("sawaed_saved_login", null);
-    setLoading(false);
-    onLogin(existingUser);
-  };
-
-  const handleRegisterNext = async () => {
-    const uname = username.trim();
-    if (uname.length < 3) { setErr("اسم المستخدم قصير (3 أحرف+)"); return; }
-    if (!USERNAME_REGEX.test(uname)) { setErr("اسم المستخدم يجب أن يحتوي فقط على حروف إنجليزية وأرقام و _ و . بدون مسافات أو رموز"); return; }
+  const registerWithEmail = async () => {
+    if (!email.trim()) { setErr("أدخل البريد الإلكتروني."); return; }
     if (!password || password.length < 6) { setErr("كلمة السر قصيرة (6 أحرف+)"); return; }
-    if (password !== confirmPw) { setErr("كلمتا السر غير متطابقتين"); return; }
-    setLoading(true); setErr("");
-    const userId = uname.replace(/\s+/g, "_").toLowerCase();
-    const existing = await fbGet("users", userId);
-    if (existing?.passwordHash) { setLoading(false); setErr("اسم المستخدم مأخوذ، اختر غيره"); return; }
-    setLoading(false); setMode("grade");
-  };
+    if (password !== confirmPassword) { setErr("كلمتا السر غير متطابقتين."); return; }
+    if (!grade || !branch) { setErr("اختر الصف والفرع."); return; }
 
-  const handleRegisterFinish = async () => {
-    if (!grade || !branch) { setErr("اختر الصف والفرع"); return; }
-    setLoading(true); setErr("");
-    const uname = username.trim();
-    const userId = uname.replace(/\s+/g, "_").toLowerCase();
-    const hashed = await hashPassword(password);
-    const userData = { id: userId, username: uname, nickname: nickname.trim() || uname, grade, branch, progress: {}, savedItems: [], pinnedNews: [], joinedAt: new Date().toISOString(), passwordHash: hashed };
-    await fbSet("users", userId, userData);
-    if (rememberMe) lsSet("sawaed_saved_login", { username: uname, nickname: userData.nickname, grade, branch });
-    else lsSet("sawaed_saved_login", null);
-    setLoading(false);
-    onLogin(userData);
+    setLoading(true);
+    setErr("");
+    try {
+      const display = displayName.trim() || email.split("@")[0];
+      await signUpWithEmail(email.trim(), password, display, {
+        username: display,
+        nickname: display,
+        grade,
+        branch,
+        progress: {},
+        savedItems: [],
+        pinnedNews: [],
+      });
+    } catch (e) {
+      setErr(formatAuthError(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const errBox = err ? <div style={{ background: `${T.danger}15`, border: `1px solid ${T.danger}44`, borderRadius: "10px", padding: "10px 14px", marginBottom: "12px" }}><p style={{ color: T.danger, fontSize: "13px", margin: 0 }}>{err}</p></div> : null;
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", maxWidth: APP_MAX_WIDTH, margin: "0 auto", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", direction: "rtl", fontFamily: "'Cairo',sans-serif", boxSizing: "border-box" }}>
-      <div style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "24px", padding: "32px 24px", width: "100%", maxWidth: "360px", backdropFilter: "blur(16px)" }}>
+      <div style={{ background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: "24px", padding: "32px 24px", width: "100%", maxWidth: "360px", backdropFilter: "blur(16px)" }}>
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
           <div style={{ fontSize: "48px" }}>🌟</div>
           <h2 style={{ color: T.accent, margin: "8px 0 0", fontSize: "22px", fontWeight: "800" }}>سواعد الخير</h2>
           <p style={{ margin: "4px 0 0", fontSize: "13px", color: T.subtext }}>
-            {mode === "start" ? "أهلاً بك!" : mode === "login" ? `مرحباً ${existingUser?.nickname || username} 👋` : mode === "register" ? "إنشاء حساب جديد" : mode === "grade" ? "اختر صفك وفرعك" : "دخول المحرر 🛡️"}
+            {mode === "start" ? "أهلاً بك!" : mode === "login" ? "تسجيل الدخول" : "إنشاء حساب جديد"}
           </p>
         </div>
+
         {errBox}
 
         {mode === "start" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <input value={username} onChange={e => { setUsername(e.target.value); setErr(""); }} placeholder="اسم المستخدم" style={inp} onKeyDown={e => e.key === "Enter" && checkUsername()} />
-            <button onClick={checkUsername} disabled={checking || !username.trim()} style={{ background: username.trim() ? `linear-gradient(135deg,${T.accent},${T.accent2})` : "#ccc", color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: username.trim() ? "pointer" : "not-allowed", fontFamily: "'Cairo',sans-serif" }}>
-              {checking ? "⏳ جاري التحقق..." : "التالي →"}
+            <button onClick={() => setMode("login")} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              🔐 تسجيل الدخول بالبريد
             </button>
-          </div>
-        )}
-
-        {mode === "editor_pw" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ background: `${T.accent}15`, borderRadius: "12px", padding: "10px 14px", textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: "13px", color: T.accent, fontWeight: "700" }}>🛡️ {username}</p>
-            </div>
-            {pwRow(editorPw, setEditorPw, "كلمة سر المحرر", showPw, setShowPw)}
-            <button onClick={handleEditorLogin} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>🚀 دخول</button>
-            <button onClick={() => { setMode("start"); setEditorPw(""); setErr(""); }} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← رجوع</button>
+            <button onClick={() => setMode("register")} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              ✍️ إنشاء حساب جديد
+            </button>
+            <button onClick={authWithGoogle} disabled={loading} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,#4285F4,#34A853)`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              {loading ? "⏳ جاري..." : "🌐 تسجيل الدخول بـ Google"}
+            </button>
           </div>
         )}
 
         {mode === "login" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ background: `${T.accent}15`, borderRadius: "12px", padding: "10px 14px", textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: "13px", color: T.accent, fontWeight: "700" }}>👤 {existingUser?.nickname || username}</p>
-            </div>
+            <input value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="البريد الإلكتروني" style={{ ...inp, direction: "ltr", textAlign: "left" }} />
             {pwRow(password, setPassword, "كلمة السر", showPw, setShowPw)}
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} style={{ accentColor: T.accent, width: "16px", height: "16px" }} />
-              <span style={{ fontSize: "13px", color: T.subtext }}>تذكرني على هذا الجهاز</span>
-            </label>
-            <button onClick={handleLogin} disabled={loading} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
-              {loading ? "⏳ جاري..." : "🚀 دخول"}
+            <button onClick={loginWithEmailPassword} disabled={loading || !email || !password} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              {loading ? "⏳ جاري..." : "🚀 تسجيل الدخول"}
             </button>
-            <button onClick={() => { setMode("start"); setPassword(""); setErr(""); }} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← تغيير اسم المستخدم</button>
+            <button onClick={() => setMode("start")} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              ← رجوع
+            </button>
           </div>
         )}
 
         {mode === "register" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ background: "#23863615", borderRadius: "12px", padding: "8px 14px", textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: "12px", color: "#238636" }}>✨ حساب جديد — {username}</p>
-            </div>
-            <input value={nickname} onChange={e => { setNickname(e.target.value); setErr(""); }} placeholder="لقبك (يظهر في الموقع — اختياري)" style={inp} />
-            {pwRow(password, setPassword, "كلمة سر (6 أحرف+)", showPw, setShowPw)}
-            <input value={confirmPw} onChange={e => { setConfirmPw(e.target.value); setErr(""); }} onPaste={e => { e.preventDefault(); setErr("لصق كلمة السر غير مسموح — يجب كتابتها يدوياً"); }} onCopy={e => e.preventDefault()} type="password" placeholder="تأكيد كلمة السر" style={{ ...inp, borderColor: confirmPw && confirmPw !== password ? T.danger : T.cardBorder }} />
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} style={{ accentColor: T.accent, width: "16px", height: "16px" }} />
-              <span style={{ fontSize: "13px", color: T.subtext }}>تذكرني على هذا الجهاز</span>
-            </label>
-            <button onClick={handleRegisterNext} disabled={loading} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
-              {loading ? "⏳..." : "التالي → اختيار الصف"}
-            </button>
-            <button onClick={() => { setMode("start"); setPassword(""); setConfirmPw(""); setErr(""); }} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← تغيير اسم المستخدم</button>
-          </div>
-        )}
-
-        {mode === "grade" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <p style={{ color: T.text, fontSize: "15px", margin: 0, fontWeight: "700" }}>اختر صفك:</p>
+            <input value={displayName} onChange={e => { setDisplayName(e.target.value); setErr(""); }} placeholder="اسم العرض" style={inp} />
+            <input value={email} onChange={e => { setEmail(e.target.value); setErr(""); }} placeholder="البريد الإلكتروني" style={{ ...inp, direction: "ltr", textAlign: "left" }} />
+            {pwRow(password, setPassword, "كلمة السر (6 أحرف+)", showPw, setShowPw)}
+            <input value={confirmPassword} onChange={e => { setConfirmPassword(e.target.value); setErr(""); }} type={showPw ? "text" : "password"} placeholder="تأكيد كلمة السر" style={{ ...inp, borderColor: confirmPassword && confirmPassword !== password ? T.danger : T.cardBorder }} />
             <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-              {config.grades?.map(g => <button key={g} onClick={() => setGrade(g)} style={{ background: grade === g ? `linear-gradient(135deg,${T.accent},${T.accent2})` : T.inputBg, color: grade === g ? "#fff" : T.text, border: `1.5px solid ${grade === g ? T.accent : T.cardBorder}`, borderRadius: "12px", padding: "10px 16px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", flex: 1, minWidth: "130px" }}>{g}</button>)}
+              <select value={grade} onChange={e => setGrade(e.target.value)} style={{ ...inp, flex: 1 }}>
+                <option value="">اختر صفك</option>
+                {config.grades?.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+              <select value={branch} onChange={e => setBranch(e.target.value)} style={{ ...inp, flex: 1 }}>
+                <option value="">اختر فرعك</option>
+                {config.branches?.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
             </div>
-            <p style={{ color: T.text, fontSize: "15px", margin: "4px 0 0", fontWeight: "700" }}>اختر فرعك:</p>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {config.branches?.map(b => <button key={b} onClick={() => setBranch(b)} style={{ background: branch === b ? `linear-gradient(135deg,${T.accent},${T.accent2})` : T.inputBg, color: branch === b ? "#fff" : T.text, border: `1.5px solid ${branch === b ? T.accent : T.cardBorder}`, borderRadius: "12px", padding: "10px 16px", fontSize: "14px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", flex: 1 }}>{b}</button>)}
-            </div>
-            <button onClick={handleRegisterFinish} disabled={!grade || !branch || loading} style={{ marginTop: "4px" }}>
-              {loading ? "...جاري" : existingUser ? " تسجيل الدخول " : " إنشاء الحساب "}
+            <button onClick={registerWithEmail} disabled={loading || !email || !password || !confirmPassword || !grade || !branch} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              {loading ? "⏳ جاري..." : "✅ إنشاء حساب"}
             </button>
-
-            <button onClick={() => setMode("register")} style={{ background: "transparent", border: "none", color: T.subtext, cursor: "pointer", fontSize: "13px", fontFamily: "'Cairo',sans-serif" }}>← رجوع</button>
+            <button onClick={() => setMode("start")} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
+              ← رجوع
+            </button>
           </div>
         )}
       </div>
@@ -1188,9 +1230,65 @@ function RegisterPage({ config, T, darkMode, onLogin, onAdmin }) {
   );
 }
 
+function OnboardingPage({ config, T, darkMode, currentUser, updateUser, onComplete }) {
+  const [grade, setGrade] = useState(currentUser?.grade || config.grades?.[0] || "");
+  const [branch, setBranch] = useState(currentUser?.branch || config.branches?.[0] || "");
+  const [stream, setStream] = useState(currentUser?.stream || currentUser?.branch || "");
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "14px", padding: "14px 16px", fontSize: "16px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
+
+  const handleSave = async () => {
+    if (!grade || !branch) { setErr("اختر الصف والفرع."); return; }
+    setLoading(true);
+    setErr("");
+    try {
+      await updateUser({ grade, branch, stream: stream || branch });
+      if (onComplete) onComplete();
+    } catch (e) {
+      setErr("فشل تحديث البيانات. حاول مرة أخرى.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", width: "100%", maxWidth: APP_MAX_WIDTH, margin: "0 auto", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px", direction: "rtl", fontFamily: "'Cairo',sans-serif", boxSizing: "border-box" }}>
+      <div style={{ background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: "24px", padding: "32px 24px", width: "100%", maxWidth: "360px", backdropFilter: "blur(16px)" }}>
+        <div style={{ textAlign: "center", marginBottom: "24px" }}>
+          <div style={{ fontSize: "48px" }}>📝</div>
+          <h2 style={{ color: T.accent, margin: "8px 0 0", fontSize: "22px", fontWeight: "800" }}>أكمل ملفك الشخصي</h2>
+          <p style={{ margin: "4px 0 0", fontSize: "13px", color: T.subtext }}>لكي نعرض لك المواد الصحيحة والمحتوى المناسب.</p>
+        </div>
+
+        {err ? <div style={{ background: `${T.danger}15`, border: `1px solid ${T.danger}44`, borderRadius: "10px", padding: "10px 14px", marginBottom: "12px" }}><p style={{ color: T.danger, fontSize: "13px", margin: 0 }}>{err}</p></div> : null}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <select value={grade} onChange={e => { setGrade(e.target.value); setErr(""); }} style={inp}>
+            <option value="">اختر صفك</option>
+            {config.grades?.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          <select value={branch} onChange={e => { setBranch(e.target.value); setErr(""); }} style={inp}>
+            <option value="">اختر فرعك</option>
+            {config.branches?.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <input value={stream} onChange={e => { setStream(e.target.value); setErr(""); }} placeholder="الشعبة (اختياري)" style={inp} />
+          <button onClick={handleSave} disabled={loading || !grade || !branch} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+            {loading ? "⏳ جاري الحفظ..." : "✅ حفظ وابدأ"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
-  const key = `${currentUser.grade}_${currentUser.branch}`;
+  if (!currentUser) {
+    return <div style={{ padding: "20px", color: T.text, textAlign: "center" }}>جارٍ إعادة التوجيه...</div>;
+  }
+  const key = `${currentUser.grade || ""}_${currentUser.branch || ""}`;
   const subjects = config.subjects?.[key] || [];
 
   const getProgress = (sub) => {
@@ -1293,7 +1391,7 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
 // FILE VIEWER - أونلاين طبيعي + أوفلاين من IndexedDB
 // ============================================================
 
-function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "application/pdf" }) {
+function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "application/pdf", onStatusChange }) {
   const [localUrl, setLocalUrl] = useState(isBlobDirect ? url : null);
   const [savedBlob, setSavedBlob] = useState(isBlobDirect ? null : null);
   const [loading, setLoading] = useState(!isBlobDirect);
@@ -1463,6 +1561,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
   }, [url, mimeType, isSavedOffline, isBlobDirect]);
 
   const handleSaveOffline = async () => {
+    if (isSavedOffline) return;
     setSaveFeedback(null);
     setIsSaving(true);
 
@@ -1486,22 +1585,33 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
       }
 
       if (!blob) throw new Error("fetch failed");
-      await idbSaveFile(fileId, blob, {
+      // Ensure explicit MIME type for stored PDF blobs to avoid corrupted/HTML fallbacks
+      let finalBlob = blob;
+      try {
+        const arr = await blob.arrayBuffer();
+        const enforcedType = isPdfMimeType(mimeType) ? "application/pdf" : (blob.type || mimeType || "application/octet-stream");
+        finalBlob = new Blob([arr], { type: enforcedType });
+      } catch (e) {
+        finalBlob = blob;
+      }
+
+      await idbSaveFile(fileId, finalBlob, {
         title: title || "ملف محفوظ محلياً",
         url,
-        type: blob.type || mimeType,
+        type: finalBlob.type || mimeType,
         savedAt: Date.now(),
         isFallback: false,
       });
-      setSavedBlob(blob);
+      setSavedBlob(finalBlob);
 
-      const objectUrl = URL.createObjectURL(blob);
+      const objectUrl = URL.createObjectURL(finalBlob);
       setLocalUrl(objectUrl);
       setIsSavedOffline(true);
       setSaveFeedback({
         type: "success",
         text: "✅ تم حفظ الملف بنجاح للوضع الأوفلاين. يمكنك فتحه لاحقاً بدون إنترنت."
       });
+      try { onStatusChange && onStatusChange(fileId, true); } catch (e) { /* ignore */ }
     } catch (err) {
       console.warn("Offline save failed:", err);
       const msg = (err?.message || '').toString();
@@ -1529,6 +1639,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
       setIsSavedOffline(false);
       if (!navigator.onLine) setError(true);
       setSaveFeedback({ type: "success", text: "✅ تم إزالة النسخة المحلية بنجاح." });
+      try { onStatusChange && onStatusChange(fileId, false); } catch (e) { /* ignore */ }
     } catch {
       setSaveFeedback({ type: "warning", text: "⚠️ فشل حذف النسخة المحفوظة." });
     }
@@ -1596,38 +1707,11 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
         isPdfMimeType(mimeType) ? (
           <div style={{ flex: 1, overflowY: "auto", maxHeight: "calc(100vh - 100px)", background: "#111", padding: "18px" }}>
             <ErrorBoundary fallback={<div style={{ color: '#fff', padding: 20 }}>فشل عرض المستند.</div>}>
-              <Document
-                file={isSavedOffline && localUrl ? localUrl : (pdfResolvedUrl || pdfSource(url))}
-                loading={<p style={{ color: "#fff", fontSize: "15px" }}>جاري تحميل PDF...</p>}
-                onLoadSuccess={({ numPages }) => {
-                  setNumPages(numPages);
-                  setPdfError(false);
-                }}
-                onLoadError={(err) => {
-                  console.error("PDF load error", err);
-                  setPdfError(true);
-                }}
-              >
-                {Array.from(new Array(numPages || 0), (_, index) => (
-                  <Page
-                    key={`pdf-page-${index + 1}`}
-                    pageNumber={index + 1}
-                    width={Math.min(window.innerWidth - 80, 900)}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                  />
-                ))}
-              </Document>
+              <PDFViewer
+                fileUrl={isSavedOffline && localUrl ? localUrl : (pdfResolvedUrl || pdfSource(url))}
+                title={title || "PDF Document"}
+              />
             </ErrorBoundary>
-
-            {pdfError && (
-              <div style={{ color: "#fff", textAlign: "center", marginTop: "18px" }}>
-                <div>⚠️ تعذّر عرض الملف. يمكنك تنزيله أو فتحه في تطبيق آخر.</div>
-                <div style={{ marginTop: 12 }}>
-                  <button onClick={() => window.open(getDownloadUrl(url), "_blank")} style={{ background: T.accent, color: '#fff', border: 'none', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}>فتح في تبويب جديد</button>
-                </div>
-              </div>
-            )}
           </div>
         ) : isImageMimeType(mimeType) ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
@@ -1833,6 +1917,13 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const [savedIds, setSavedIds] = useState(new Set());
   const [editorMode, setEditorMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [showAddFolderModal, setShowAddFolderModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameIndex, setRenameIndex] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [pendingUploadFile, setPendingUploadFile] = useState(null);
+  const [showDriveLinkModal, setShowDriveLinkModal] = useState(false);
+  const [driveLink, setDriveLink] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [form, setForm] = useState({ title: "", url: "", description: "", type: "link" });
@@ -1914,6 +2005,35 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     setNewFolderName("");
   };
 
+  const openRenameModal = (index, currentName) => {
+    setRenameIndex(index);
+    setRenameValue(currentName);
+    setShowRenameModal(true);
+  };
+
+  const handleRenameSubmit = async () => {
+    if (renameIndex === null || !renameValue.trim()) return;
+    await renameItem(renameIndex, renameValue.trim());
+    setShowRenameModal(false);
+    setRenameIndex(null);
+    setRenameValue("");
+  };
+
+  const handleUploadLinkSubmit = () => {
+    if (!pendingUploadFile || !driveLink.trim()) {
+      setPendingUploadFile(null);
+      setShowDriveLinkModal(false);
+      setUploading(false);
+      return;
+    }
+    const fileType = pendingUploadFile.type.includes("pdf") ? "pdf" : pendingUploadFile.type.includes("image") ? "image" : "link";
+    setForm(f => ({ ...f, title: f.title || pendingUploadFile.name.replace(/\.[^/.]+$/, ""), url: driveLink.trim(), type: fileType }));
+    setPendingUploadFile(null);
+    setDriveLink("");
+    setShowDriveLinkModal(false);
+    setUploading(false);
+  };
+
   const deleteItem = async (index) => {
     const newItems = currentItems.filter((_, i) => i !== index);
     await saveCurrentItems(newItems);
@@ -1942,7 +2062,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   // downloadInApp v3 — 4 مسارات للحفظ الأوفلاين
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   const downloadInApp = async (resource) => {
-    const fileId = getOfflineFileId(resource.url);
+    const fileId = getOfflineItemId(resource);
 
     // ─── إذا محفوظ مسبقاً → افتحه مباشرة ───
     if (savedIds.has(fileId)) {
@@ -1980,9 +2100,18 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     const saveBlob = async (blob) => {
       if (!blob || blob.size < 500) throw new Error("blob فارغ");
       await idbSaveFile(fileId, blob, {
-        title: resource.title, description: resource.description || "",
-        type: resource.type || "pdf", url: resource.url,
-        subject, grade, branch, semester, section, isFallback: false,
+        title: resource.title,
+        description: resource.description || "",
+        type: resource.type || "pdf",
+        url: resource.url,
+        sourceItemId: resource.id || null,
+        sourceUrl: resource.url,
+        subject,
+        grade,
+        branch,
+        semester,
+        section,
+        isFallback: false,
       });
       setSavedIds(s => new Set([...s, fileId]));
       setDlProgress(p => ({ ...p, [fileId]: "done" }));
@@ -2037,14 +2166,9 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     if (!file) return;
     setUploading(true);
     setUploadPct(0);
-    try {
-      const driveLink = prompt("أدخل رابط Google Drive للملف:");
-      if (driveLink) {
-        const fileType = file.type.includes("pdf") ? "pdf" : file.type.includes("image") ? "image" : "link";
-        setForm(f => ({ ...f, title: f.title || file.name.replace(/\.[^/.]+$/, ""), url: driveLink, type: fileType }));
-      }
-    } catch { alert("فشل رفع الملف"); }
-    setUploading(false);
+    setPendingUploadFile(file);
+    setDriveLink("");
+    setShowDriveLinkModal(true);
   };
 
   const addResource = async () => {
@@ -2107,14 +2231,14 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
           </div>
           {canEditStructure && editorMode && (
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => { const newName = prompt("أدخل الاسم الجديد:", item.name); if (newName) renameItem(index, newName); }} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px" }}>✏️</button>
+              <button onClick={() => openRenameModal(index, item.name)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px" }}>✏️</button>
               <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>
             </div>
           )}
         </div>
       );
     } else {
-      const fileId = getOfflineFileId(item.url || "");
+      const fileId = getOfflineItemId(item);
       const isOfflineSaved = savedIds.has(fileId);
       const prog = dlProgress[fileId];
       const isDownloading = typeof prog === "number";
@@ -2212,7 +2336,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       {canEditStructure && editorMode && (
         <div style={{ margin: "12px 16px", background: T.card, border: `1.5px dashed ${T.accent}`, borderRadius: "16px", padding: "14px" }}>
           <p style={{ color: T.accent, fontWeight: "700", fontSize: "14px", margin: "0 0 10px" }}>➕ إضافة محتوى</p>
-          <button onClick={() => { const name = prompt("أدخل اسم المجلد الجديد:"); if (name) { setNewFolderName(name); createFolder(); } }} style={{ width: "100%", background: `${T.accent}15`, border: `2px dashed ${T.accent}`, borderRadius: "10px", padding: "12px", color: T.accent, fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif", marginBottom: "8px" }}>📁 إنشاء مجلد جديد</button>
+          <button onClick={() => setShowAddFolderModal(true)} style={{ width: "100%", background: `${T.accent}15`, border: `2px dashed ${T.accent}`, borderRadius: "10px", padding: "12px", color: T.accent, fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif", marginBottom: "8px" }}>📁 إنشاء مجلد جديد</button>
           <button onClick={() => fileRef.current?.click()} style={{ width: "100%", background: `${T.accent}15`, border: `2px dashed ${T.accent}`, borderRadius: "10px", padding: "12px", color: T.accent, fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif", marginBottom: "8px" }}>{uploading ? `⏳ ${uploadPct}%` : "📤 إضافة رابط Google Drive"}</button>
           <input ref={fileRef} type="file" accept=".pdf,image/*" onChange={handleFileUpload} style={{ display: "none" }} />
           <input value={form.title} onChange={(e) => { setForm(prev => ({ ...prev, title: e.target.value })); }} placeholder="العنوان *" style={inputStyle} />
@@ -2227,6 +2351,34 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
         {!loading && currentItems.length === 0 && <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>هذا المجلد فارغ</p></div>}
         {currentItems.map((item, index) => renderItem(item, index))}
       </div>
+
+      <Modal open={showAddFolderModal} title="إنشاء مجلد جديد" onClose={() => setShowAddFolderModal(false)} footer={(
+        <>
+          <button onClick={() => setShowAddFolderModal(false)} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={() => { createFolder(); setShowAddFolderModal(false); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إنشاء</button>
+        </>
+      )}>
+        <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inputStyle} />
+      </Modal>
+
+      <Modal open={showRenameModal} title="إعادة تسمية المجلد" onClose={() => setShowRenameModal(false)} footer={(
+        <>
+          <button onClick={() => setShowRenameModal(false)} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={handleRenameSubmit} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+        </>
+      )}>
+        <input value={renameValue} onChange={e => setRenameValue(e.target.value)} placeholder="الاسم الجديد" style={inputStyle} />
+      </Modal>
+
+      <Modal open={showDriveLinkModal} title="أدخل رابط Google Drive" onClose={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} footer={(
+        <>
+          <button onClick={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={handleUploadLinkSubmit} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+        </>
+      )}>
+        <p style={{ margin: 0, color: T.subtext, marginBottom: "12px" }}>{pendingUploadFile ? `حدد الرابط للملف: ${pendingUploadFile.name}` : "حدد ملفاً أولاً."}</p>
+        <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="رابط Google Drive" style={inputStyle} />
+      </Modal>
     </div>
   );
 }
@@ -2275,7 +2427,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   })();
 
   const handleFoundationSave = async (item) => {
-    const fileId = getOfflineFileId(item.url);
+    const fileId = getOfflineItemId(item);
     setDlProgress(p => ({ ...p, [fileId]: 0 }));
     try {
       const proxyUrl = driveProxyUrl(item.url);
@@ -2284,7 +2436,15 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
       if (!resp.ok) throw new Error("fetch failed");
       const blob = await resp.blob();
       if (!blob || blob.size < 500) throw new Error("empty blob");
-      await idbSaveFile(fileId, blob, { title: item.title, description: item.description || "", url: item.url, type: item.type || getFileMimeType(item), isFallback: false });
+      await idbSaveFile(fileId, blob, {
+        title: item.title,
+        description: item.description || "",
+        url: item.url,
+        type: item.type || getFileMimeType(item),
+        sourceItemId: item.id || null,
+        sourceUrl: item.url,
+        isFallback: false,
+      });
       setSavedIds(s => new Set([...s, fileId]));
       setDlProgress(p => { const n = { ...p }; delete n[fileId]; return n; });
     } catch (err) {
@@ -2295,7 +2455,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   };
 
   const handleFoundationOpen = async (item) => {
-    const fileId = getOfflineFileId(item.url);
+    const fileId = getOfflineItemId(item);
     if (savedIds.has(fileId)) {
       const saved = await idbGetFile(fileId);
       if (saved?.blob && saved.blob.size > 0) {
@@ -2307,7 +2467,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
     setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) });
   };
 
-  if (viewerData) return <FileViewer url={viewerData.url} title={viewerData.title} T={T} isBlobDirect={viewerData.isBlob} mimeType={viewerData.mimeType || "application/pdf"} onClose={() => { if (viewerData.isBlob) URL.revokeObjectURL(viewerData.url); setViewerData(null); }} />;
+  if (viewerData) return <FileViewer url={viewerData.url} title={viewerData.title} T={T} isBlobDirect={viewerData.isBlob} mimeType={viewerData.mimeType || "application/pdf"} onClose={() => { if (viewerData.isBlob) URL.revokeObjectURL(viewerData.url); setViewerData(null); }} onStatusChange={(fileId, isDownloaded) => { if (isDownloaded) setSavedIds(s => new Set([...s, fileId])); else setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} />;
 
   return (
     <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl", paddingBottom: "30px" }}>
@@ -2354,7 +2514,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
                   <p style={{ margin: "0 0 6px", fontWeight: "700", color: T.text }}>{item.title}</p>
                   {item.description && <p style={{ margin: "0 0 8px", fontSize: "13px", color: T.subtext }}>{item.description}</p>}
                   {item.url && (() => {
-                    const fileId = getOfflineFileId(item.url);
+                    const fileId = getOfflineItemId(item);
                     const isOfflineSaved = savedIds.has(fileId);
                     const prog = dlProgress[fileId];
                     const isDownloading = typeof prog === "number";
@@ -2809,19 +2969,24 @@ function StudyTimer({ T, onClose }) {
 // SETTINGS
 // ============================================================
 
-function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUser, logout, onAdmin, onOpenTimer }) {
-  const [editNickname, setEditNickname] = useState(currentUser.nickname || currentUser.username || "");
-  const [editGrade, setEditGrade] = useState(currentUser.grade);
-  const [editBranch, setEditBranch] = useState(currentUser.branch);
+function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUser, logout, onOpenAdmin, onOpenTimer }) {
+  const { isAdmin } = useAuth();
+  const [editNickname, setEditNickname] = useState(currentUser?.nickname || currentUser?.username || "");
+  const [editGrade, setEditGrade] = useState(currentUser?.grade || config.grades?.[0] || "");
+  const [editBranch, setEditBranch] = useState(currentUser?.branch || config.branches?.[0] || "");
   const [saved, setSaved] = useState(false);
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px 14px", fontSize: "14px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
 
   const handleSave = async () => {
-    await updateUser({ nickname: editNickname.trim() || currentUser.username, grade: editGrade, branch: editBranch });
+    await updateUser({ nickname: editNickname.trim() || currentUser?.username || "", grade: editGrade, branch: editBranch });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  if (!currentUser) {
+    return <div style={{ padding: "20px", color: T.text, textAlign: "center" }}>جارٍ تسجيل الخروج...</div>;
+  }
 
   const [notifStatus, setNotifStatus] = useState(Notification.permission || "default");
 
@@ -2861,6 +3026,11 @@ function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUse
   return (
     <div style={{ padding: "20px 16px", fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
       <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 20px" }}>⚙️ الإعدادات</h2>
+      {isAdmin && (
+        <button onClick={() => onOpenAdmin && onOpenAdmin()} style={{ width: "100%", background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", marginBottom: "18px", fontFamily: "'Cairo',sans-serif" }}>
+          🛡️ لوحة الإدارة
+        </button>
+      )}
 
       {/* تايمر دراسة */}
       <button onClick={() => onOpenTimer && onOpenTimer()} style={{ width: "100%", background: `linear-gradient(135deg,${T.accent}22,${T.accent2}22)`, border: `1.5px solid ${T.accent}55`, borderRadius: "16px", padding: "16px", display: "flex", alignItems: "center", gap: "14px", cursor: "pointer", marginBottom: "14px", fontFamily: "'Cairo',sans-serif", textAlign: "right" }}>
@@ -3611,6 +3781,9 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [form, setForm] = useState({ title: "", url: "", description: "", teacher: "", type: "link" });
+  const [showDriveLinkModal, setShowDriveLinkModal] = useState(false);
+  const [pendingUploadFile, setPendingUploadFile] = useState(null);
+  const [driveLink, setDriveLink] = useState("");
   const fileRef = useRef();
 
   const foundKey = `found_${selSub}_${selBranch}_${selType}_${selArea}`;
@@ -3626,13 +3799,23 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   const handleFile = async (e) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true); setUploadPct(0);
-    try {
-      const driveLink = prompt("أدخل رابط Google Drive للملف:");
-      if (driveLink) {
-        const fileType = file.type.includes("pdf") ? "pdf" : file.type.includes("image") ? "image" : "link";
-        setForm(f => ({ ...f, title: f.title || file.name.replace(/\.[^/.]+$/, ""), url: driveLink, type: fileType }));
-      }
-    } catch { alert("فشل رفع الملف"); }
+    setPendingUploadFile(file);
+    setDriveLink("");
+    setShowDriveLinkModal(true);
+  };
+
+  const handleDriveLinkSubmit = () => {
+    if (!pendingUploadFile || !driveLink.trim()) {
+      setPendingUploadFile(null);
+      setShowDriveLinkModal(false);
+      setUploading(false);
+      return;
+    }
+    const fileType = pendingUploadFile.type.includes("pdf") ? "pdf" : pendingUploadFile.type.includes("image") ? "image" : "link";
+    setForm(f => ({ ...f, title: f.title || pendingUploadFile.name.replace(/\.[^/.]+$/, ""), url: driveLink.trim(), type: fileType }));
+    setPendingUploadFile(null);
+    setDriveLink("");
+    setShowDriveLinkModal(false);
     setUploading(false);
   };
 
@@ -3665,6 +3848,15 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
         <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف (اختياري)" style={inp} />
         <button onClick={async () => { if (!form.title || !form.url) return; await save([...items, { ...form }]); setForm({ title: "", url: "", description: "", teacher: "", type: "link" }); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>+ إضافة</button>
       </div>
+      <Modal open={showDriveLinkModal} title="أدخل رابط Google Drive" onClose={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} footer={(
+        <>
+          <button onClick={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={handleDriveLinkSubmit} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+        </>
+      )}>
+        <p style={{ margin: 0, color: T.subtext, marginBottom: "12px" }}>{pendingUploadFile ? `حدد الرابط للملف: ${pendingUploadFile.name}` : "حدد ملفاً أولاً."}</p>
+        <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="رابط Google Drive" style={inp} />
+      </Modal>
       {items.length > 0 && (
         <div>
           <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>اسحب ↕ لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف</p>
@@ -4100,6 +4292,12 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [selectedBranch, setSelectedBranch] = useState(branches[0] || "");
   const [selectedSemester, setSelectedSemester] = useState("فصل أول");
   const [selectedSubject, setSelectedSubject] = useState("");
+  const [showAddFolderModal, setShowAddFolderModal] = useState(false);
+  const [showAddFileModal, setShowAddFileModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFileTitle, setNewFileTitle] = useState("");
+  const [newFileUrl, setNewFileUrl] = useState("");
+  const [newFileType, setNewFileType] = useState("link");
 
   const sectionsList = config.subjectSections || [
     "الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات",
@@ -4193,24 +4391,22 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   };
   const selectStyle = { ...inp };
 
-  const addFolder = () => {
-    const name = prompt("أدخل اسم المجلد الجديد:");
-    if (name && name.trim()) {
-      const newData = [...folderData, { type: "folder", name: name.trim(), children: [] }];
-      saveFolderData(newData);
-    }
+  const addFolder = async () => {
+    if (!newFolderName.trim()) return;
+    const newData = [...folderData, { type: "folder", name: newFolderName.trim(), children: [] }];
+    await saveFolderData(newData);
+    setNewFolderName("");
+    setShowAddFolderModal(false);
   };
 
-  const addFile = () => {
-    const title = prompt("أدخل اسم الملف:");
-    if (title && title.trim()) {
-      const url = prompt("أدخل رابط Google Drive:");
-      if (url && url.trim()) {
-        const type = prompt("نوع الملف (pdf, image, link):") || "link";
-        const newData = [...folderData, { title: title.trim(), url: url.trim(), type, description: "" }];
-        saveFolderData(newData);
-      }
-    }
+  const addFile = async () => {
+    if (!newFileTitle.trim() || !newFileUrl.trim()) return;
+    const newData = [...folderData, { title: newFileTitle.trim(), url: newFileUrl.trim(), type: newFileType, description: "" }];
+    await saveFolderData(newData);
+    setNewFileTitle("");
+    setNewFileUrl("");
+    setNewFileType("link");
+    setShowAddFileModal(false);
   };
 
   const deleteItem = (index) => {
@@ -4276,10 +4472,10 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
       ) : (
         <>
           <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
-            <button onClick={addFolder} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
+            <button onClick={() => setShowAddFolderModal(true)} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
               ➕ مجلد جديد
             </button>
-            <button onClick={addFile} style={{ flex: 1, background: T.accent2, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
+            <button onClick={() => setShowAddFileModal(true)} style={{ flex: 1, background: T.accent2, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
               📄 ملف جديد
             </button>
           </div>
@@ -4304,6 +4500,30 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
               </div>
             )}
           </div>
+
+          <Modal open={showAddFolderModal} title="إنشاء مجلد جديد" onClose={() => { setShowAddFolderModal(false); setNewFolderName(""); }} footer={(
+            <>
+              <button onClick={() => { setShowAddFolderModal(false); setNewFolderName(""); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+              <button onClick={addFolder} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إنشاء</button>
+            </>
+          )}>
+            <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
+          </Modal>
+
+          <Modal open={showAddFileModal} title="إضافة ملف جديد" onClose={() => { setShowAddFileModal(false); setNewFileTitle(""); setNewFileUrl(""); setNewFileType("link"); }} footer={(
+            <>
+              <button onClick={() => { setShowAddFileModal(false); setNewFileTitle(""); setNewFileUrl(""); setNewFileType("link"); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+              <button onClick={addFile} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+            </>
+          )}>
+            <input value={newFileTitle} onChange={e => setNewFileTitle(e.target.value)} placeholder="اسم الملف" style={inp} />
+            <input value={newFileUrl} onChange={e => setNewFileUrl(e.target.value)} placeholder="رابط Google Drive" style={inp} />
+            <select value={newFileType} onChange={e => setNewFileType(e.target.value)} style={inp}>
+              <option value="pdf">pdf</option>
+              <option value="image">image</option>
+              <option value="link">link</option>
+            </select>
+          </Modal>
         </>
       )}
     </AdminSection>
