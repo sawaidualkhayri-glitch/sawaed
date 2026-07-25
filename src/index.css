@@ -52,18 +52,28 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
   text-align: center;
-  border-inline: 1px solid var(--border);
+  border-inline: none;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+@media (max-width: 767px) {
+  #root {
+    width: 100%;
+    max-width: none;
+    border-inline: none;
+  }
 }
 
 h1,
