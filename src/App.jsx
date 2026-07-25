@@ -2390,12 +2390,12 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
 function FoundationPage({ config, T, onSubject }) {
   return (
     <div className="app-shell-fluid" style={{ fontFamily: "'Cairo',sans-serif", direction: "rtl", padding: "20px 0" }}>
-      <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 16px" }}>🏗️ صفحة التأسيس</h2>
-      <div className="subpage-grid" style={{ padding: "0" }}>
+      <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 24px" }}>🏗️ صفحة التأسيس</h2>
+      <div className="subpage-grid" style={{ padding: "0", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "28px" }}>
         {config.foundationSubjects?.map(sub => (
-          <button key={sub} onClick={() => onSubject({ subject: sub })} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "18px", padding: "20px 12px", cursor: "pointer", textAlign: "center", backdropFilter: "blur(12px)", boxShadow: T.shadow }}>
-            <div style={{ fontSize: "32px", marginBottom: "8px" }}>{EMOJI[sub] || "📌"}</div>
-            <div style={{ fontSize: "14px", fontWeight: "700", color: T.text }}>{sub}</div>
+          <button key={sub} onClick={() => onSubject({ subject: sub })} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "24px", padding: "26px 20px", cursor: "pointer", textAlign: "center", backdropFilter: "blur(12px)", boxShadow: T.shadow, minWidth: "150px", width: "180px", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
+            <div style={{ fontSize: "36px", width: "56px", height: "56px", display: "flex", alignItems: "center", justifyContent: "center" }}>{EMOJI[sub] || "📌"}</div>
+            <div style={{ fontSize: "17px", fontWeight: "700", color: T.text, lineHeight: 1.3 }}>{sub}</div>
           </button>
         ))}
       </div>
