@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { pdfjs } from "react-pdf";
 import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
-import { useAuth } from "./AuthContext.jsx";
-import { loginWithEmail, signUpWithEmail, loginWithGoogle } from "./firebaseAuth";
+import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMalazem, canManageTaasees, canManageNews } from "./AuthContext.jsx";
+import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded, deleteEditorAccount, smartMigrateAndSync } from "./firebaseAuth";
+import { db, getEditorProvisioningAuth } from "./firebase";
 
 // Use a locally served pdf.worker to guarantee offline rendering in the PWA.
 // Place a copy of the pdf.worker script at `public/pdf.worker.min.js` (from pdfjs-dist)
@@ -611,11 +614,11 @@ const DEFAULT_CONFIG = {
   // حسابات المحررين الافتراضية (يمكن للمحرر "admin" فقط إضافة/حذف محررين)
   // ============================================================
   editors: [
-    { username: "محرر سواعد الخير 1", password: "34778", role: "all" },
-    { username: "Nadosh The Top", password: "hello its me", role: "admin" },
-    { username: "محرر سواعد الخير ملازم 2", password: "732663", role: "notes" },
-    { username: "محرر سواعد الخير تأسيس 3", password: "84473", role: "foundation" },
-    { username: "محرر سواعد الخير تنسيق 4", password: "368784", role: "content" },
+    { username: "محرر سواعد الخير 1", password: "34778", role: "editor_full" },
+    { username: "Nadosh The Top", password: "hello its me", role: "super_admin" },
+    { username: "محرر سواعد الخير ملازم 2", password: "732663", role: "editor_malazem" },
+    { username: "محرر سواعد الخير تأسيس 3", password: "84473", role: "editor_taasees" },
+    { username: "محرر سواعد الخير تنسيق 4", password: "368784", role: "editor_news" },
   ],
 };
 
@@ -661,12 +664,16 @@ export default function App() {
   const [config, setConfig] = useState(() => ls("sawaed_config", DEFAULT_CONFIG));
   const [darkMode, setDarkMode] = useState(() => ls("sawaed_dark", false));
   const [page, setPage] = useState("loading");
-  const { currentUser, authLoading, logout: authLogout, updateUserProfile } = useAuth();
+  const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
+  const role = normalizeUserRole(currentUser?.role || "user");
+  const rawRole = (currentUser?.role || "user").toString().trim().toLowerCase();
+  const isFullAdmin = role === "super_admin" || rawRole === "admin";
+  const isAdminLike = isFullAdmin || ["editor_full", "editor_malazem", "editor_news", "editor_taasees"].includes(role);
   const [activePage, setActivePage] = useState("home");
   const [quoteIdx, setQuoteIdx] = useState(0);
   const [flame, setFlame] = useState(() => initFlame());
-  const needsOnboarding = (user) => !!user && (!user.grade || !user.branch);
   const openAdminPanel = () => setPage("admin");
+  const shouldForceOnboarding = Boolean(authNeedsOnboarding && currentUser && !isAdminLike);
   const handleOnboardingComplete = () => setPage("main");
   const [subjectNav, setSubjectNav] = useState(null);
   const [folderNav, setFolderNav] = useState(null);
@@ -675,6 +682,13 @@ export default function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const T = darkMode ? DARK : LIGHT;
+
+  useEffect(() => {
+    const editorsToSeed = (config.editors && config.editors.length > 0 ? config.editors : DEFAULT_CONFIG.editors) || [];
+    ensureEditorAccountsSeeded(editorsToSeed).catch((error) => {
+      console.error("Failed to seed editor accounts:", error);
+    });
+  }, [config.editors]);
 
   // Sync a theme class on the document element so native widgets (select/options) can be themed via CSS
   useEffect(() => {
@@ -920,8 +934,10 @@ export default function App() {
     if (currentUser) {
       const { streak } = calcFlame();
       setFlame(streak);
-      if (needsOnboarding(currentUser)) {
+      if (shouldForceOnboarding) {
         setPage("onboarding");
+      } else if (isAdminLike) {
+        setPage("admin");
       } else {
         setPage("main");
       }
@@ -933,7 +949,7 @@ export default function App() {
       setFoundNav(null);
       setNewsDetail(null);
     }
-  }, [configLoaded, authLoading, currentUser, config.splashEnabled]);
+  }, [configLoaded, authLoading, currentUser, config.splashEnabled, authNeedsOnboarding, isAdminLike]);
 
   useEffect(() => {
     if (config.motivationalFixed || !config.motivationalQuotes?.length) return;
@@ -941,6 +957,10 @@ export default function App() {
     const t = setTimeout(() => setQuoteIdx(i => (i + 1) % config.motivationalQuotes.length), mins * 60 * 1000);
     return () => clearTimeout(t);
   }, [quoteIdx, config]);
+
+  useEffect(() => {
+    ensureEditorAccountsSeeded().catch(() => {});
+  }, []);
 
   const saveConfig = async (newCfg) => {
     setConfig(newCfg);
@@ -973,7 +993,7 @@ export default function App() {
     return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: T.text, padding: 24 }}>جارٍ إعادة التوجيه...</div>;
   }
 
-  if (page === "admin") return <AdminPanel config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} editorRole={null} editorPermissions={null} onBack={() => { setPage(currentUser ? "main" : "register"); popNav(); }} />;
+  if (page === "admin") return <AdminPanel config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} editorRole={role} editorPermissions={null} onBack={() => { setPage(currentUser ? "main" : "register"); popNav(); }} />;
   if (folderNav) return <FolderPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} data={folderNav} onBack={() => { setFolderNav(null); popNav(); }} isEditorSession={false} editorRole={null} editorPermissions={null} />;
   if (subjectNav) return <SubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} subject={subjectNav} onBack={() => { setSubjectNav(null); popNav(); }} isEditorSession={false} editorRole={null} onOpenFolder={openFolder} />;
   if (foundNav) return <FoundationSubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} data={foundNav} onBack={() => { setFoundNav(null); popNav(); }} />;
@@ -1076,12 +1096,14 @@ function formatAuthError(error) {
   const code = error.code || "";
   switch (code) {
     case "auth/invalid-email": return "البريد الإلكتروني غير صالح.";
-    case "auth/user-not-found": return "لا يوجد حساب مرتبط بهذا البريد الإلكتروني.";
-    case "auth/wrong-password": return "كلمة السر غير صحيحة.";
+    case "auth/user-not-found": return "الحساب غير موجود.";
+    case "auth/wrong-password":
+    case "auth/invalid-credential": return "اسم المستخدم أو كلمة السر غير صحيحة.";
     case "auth/email-not-verified": return "يرجى تأكيد بريدك الإلكتروني. تم إرسال رابط التحقق.";
     case "auth/email-already-in-use": return "هذا البريد الإلكتروني مستخدم بالفعل.";
     case "auth/weak-password": return "كلمة السر ضعيفة. استخدم 6 أحرف على الأقل.";
     case "auth/popup-closed-by-user": return "تم إغلاق نافذة Google قبل اكتمال الدخول.";
+    case "auth/username-not-found": return "اسم المستخدم غير موجود.";
     default: return error.message || "حدث خطأ. حاول مرة أخرى.";
   }
 }
@@ -1120,13 +1142,14 @@ function RegisterPage({ config, T, darkMode }) {
   };
 
   const loginWithEmailPassword = async () => {
-    if (!email.trim()) { setErr("أدخل البريد الإلكتروني."); return; }
+    if (!email.trim()) { setErr("أدخل البريد أو اسم المستخدم."); return; }
     if (!password) { setErr("أدخل كلمة السر."); return; }
     setLoading(true);
     setErr("");
     try {
-      await loginWithEmail(email.trim(), password);
+      await loginWithIdentifier(email.trim(), password);
     } catch (e) {
+      console.error("[RegisterPage] login failed", { identifier: email.trim(), code: e?.code, message: e?.message });
       setErr(formatAuthError(e));
     } finally {
       setLoading(false);
@@ -1232,7 +1255,7 @@ function RegisterPage({ config, T, darkMode }) {
 
 function OnboardingPage({ config, T, darkMode, currentUser, updateUser, onComplete }) {
   const [grade, setGrade] = useState(currentUser?.grade || config.grades?.[0] || "");
-  const [branch, setBranch] = useState(currentUser?.branch || config.branches?.[0] || "");
+  const [branch, setBranch] = useState(currentUser?.branch || currentUser?.stream || config.branches?.[0] || "");
   const [stream, setStream] = useState(currentUser?.stream || currentUser?.branch || "");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1240,11 +1263,19 @@ function OnboardingPage({ config, T, darkMode, currentUser, updateUser, onComple
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "14px", padding: "14px 16px", fontSize: "16px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
 
   const handleSave = async () => {
-    if (!grade || !branch) { setErr("اختر الصف والفرع."); return; }
+    const selectedStream = (stream || branch || "").trim();
+    const selectedBranch = (branch || selectedStream || "").trim();
+    if (!grade || !selectedStream) { setErr("اختر الصف والشعبة."); return; }
     setLoading(true);
     setErr("");
     try {
-      await updateUser({ grade, branch, stream: stream || branch });
+      await updateUser({
+        grade,
+        branch: selectedBranch,
+        stream: selectedStream,
+        profileCompleted: true,
+        onboardingCompletedAt: new Date().toISOString(),
+      });
       if (onComplete) onComplete();
     } catch (e) {
       setErr("فشل تحديث البيانات. حاول مرة أخرى.");
@@ -1274,8 +1305,8 @@ function OnboardingPage({ config, T, darkMode, currentUser, updateUser, onComple
             <option value="">اختر فرعك</option>
             {config.branches?.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
-          <input value={stream} onChange={e => { setStream(e.target.value); setErr(""); }} placeholder="الشعبة (اختياري)" style={inp} />
-          <button onClick={handleSave} disabled={loading || !grade || !branch} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+          <input value={stream} onChange={e => { setStream(e.target.value); setErr(""); }} placeholder="الشعبة (علمي/أدبي)" style={inp} />
+          <button onClick={handleSave} disabled={loading || !grade || !(stream || branch)} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
             {loading ? "⏳ جاري الحفظ..." : "✅ حفظ وابدأ"}
           </button>
         </div>
@@ -1916,6 +1947,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const [viewerData, setViewerData] = useState(null);
   const [savedIds, setSavedIds] = useState(new Set());
   const [editorMode, setEditorMode] = useState(false);
+  const role = normalizeUserRole(currentUser?.role || "user");
   const [newFolderName, setNewFolderName] = useState("");
   const [showAddFolderModal, setShowAddFolderModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -1965,10 +1997,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const isEditor = isEditorSession;
   // محرر كامل / مسؤول (admin) لهما صلاحية كاملة على كل شيء، ومحرر "الملازم" له صلاحية إدارة الملفات والمجلدات فقط
   // كما تُحترم الصلاحيات المخصّصة (custom permissions) التي يضبطها المسؤول لكل محرر على حدة
-  const canEditStructure = isEditor && (
-    editorRole === "all" || editorRole === "admin" || editorRole === "super" || editorRole === "notes" ||
-    (editorRole === "custom" && Array.isArray(editorPermissions) && editorPermissions.includes("folders"))
-  );
+  const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem");
 
   const saveFolderData = async (newData) => {
     const newConfig = { ...config, [storageKey]: JSON.stringify(newData) };
@@ -2295,12 +2324,22 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
               <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", alignItems: "center" }}>
                 {item.url && !isDownloading && (
                   <>
-                    <button onClick={() => setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) })} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+                    <button onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (item.type === "link") {
+                        window.open(item.url, "_blank", "noopener,noreferrer");
+                      } else {
+                        setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) });
+                      }
+                    }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
                       🌐 أونلاين
                     </button>
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
-                      {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ"}
-                    </button>
+                    {item.type !== "link" && (
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                        {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ"}
+                      </button>
+                    )}
                     {isOfflineSaved && (
                       <button onClick={async () => {
                         if (!window.confirm(`حذف النسخة الأوفلاين من "${item.title}"؟`)) return;
@@ -2971,6 +3010,7 @@ function StudyTimer({ T, onClose }) {
 
 function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUser, logout, onOpenAdmin, onOpenTimer }) {
   const { isAdmin } = useAuth();
+  const canOpenAdminPanel = isAnyEditor(currentUser?.role);
   const [editNickname, setEditNickname] = useState(currentUser?.nickname || currentUser?.username || "");
   const [editGrade, setEditGrade] = useState(currentUser?.grade || config.grades?.[0] || "");
   const [editBranch, setEditBranch] = useState(currentUser?.branch || config.branches?.[0] || "");
@@ -3026,7 +3066,7 @@ function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUse
   return (
     <div style={{ padding: "20px 16px", fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
       <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 20px" }}>⚙️ الإعدادات</h2>
-      {isAdmin && (
+      {canOpenAdminPanel && (
         <button onClick={() => onOpenAdmin && onOpenAdmin()} style={{ width: "100%", background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "15px", fontWeight: "700", cursor: "pointer", marginBottom: "18px", fontFamily: "'Cairo',sans-serif" }}>
           🛡️ لوحة الإدارة
         </button>
@@ -3160,68 +3200,100 @@ function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUse
 
 function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermissions, onBack }) {
   const [section, setSection] = useState("main");
+  const [activeSubSection, setActiveSubSection] = useState(null);
 
-  // كل قسم يحدّد الأدوار المسموح لها بالوصول إليه
-  // all/admin: صلاحية كاملة (Editor 1 و Editor 2)
-  // notes: الملازم فقط (Editor 3) | foundation: التأسيس فقط (Editor 4) | content: أخبار/عبارات/دروس/إنجاز فقط (Editor 5)
-  // custom: صلاحيات مخصّصة يحددها المسؤول (Nadosh The Top) لكل محرر على حدة عبر editorPermissions
+  const role = normalizeUserRole(editorRole || "user");
+  const isMaterialsEditor = role === "editor_malazem";
+  const contentOverviewRoles = ["super_admin", "admin", "editor_full", "editor_news"];
+  const materialsEditorRoles = ["editor_malazem", "editor_files", "notes"];
+  const contentEditorRoles = ["super_admin", "admin", "editor_full", "editor_news"];
   const allAdminSections = [
-    { id: "splash", label: "شاشة البداية", icon: "🌟", roles: ["all", "admin"] },
-    { id: "grades", label: "الصفوف والفروع", icon: "🏫", roles: ["all", "admin"] },
-    { id: "subjects", label: "المواد الدراسية", icon: "📚", roles: ["all", "admin"] },
-    { id: "sections", label: "أقسام المادة (الرزم، الكتب...)", icon: "📂", roles: ["all", "admin"] },
-    { id: "folders", label: "إدارة المجلدات (الملازم والملفات)", icon: "📂", roles: ["all", "admin", "notes"] },
-    { id: "lessons", label: "الدروس والإنجاز", icon: "✅", roles: ["all", "admin", "content"] },
-    { id: "quotes", label: "العبارات التحفيزية", icon: "💬", roles: ["all", "admin", "content"] },
-    { id: "foundation", label: "محتوى التأسيس", icon: "🏗️", roles: ["all", "admin", "foundation"] },
-    { id: "news", label: "الأخبار", icon: "📰", roles: ["all", "admin", "content"] },
-    { id: "announcements", label: "إشعارات وإعلانات فورية", icon: "📢", roles: ["all", "admin", "content"] },
-    { id: "nav", label: "الصفحات والتنقل", icon: "🧭", roles: ["all", "admin"] },
-    { id: "contact", label: "روابط التواصل", icon: "📞", roles: ["all", "admin"] },
-    { id: "editors", label: "إدارة المحررين", icon: "🛡️", roles: ["admin"] },
-    { id: "password", label: "تغيير كلمة السر", icon: "🔐", roles: ["all", "admin"] },
+    { id: "splash", label: "شاشة البداية", icon: "🌟", isAllowed: (currentRole) => ["super_admin", "editor_full"].includes(currentRole) },
+    { id: "grades", label: "الصفوف والفروع", icon: "🏫", isAllowed: (currentRole) => currentRole === "super_admin" },
+    { id: "subjects", label: "المواد الدراسية", icon: "📚", isAllowed: (currentRole) => ["super_admin", "editor_full", "editor_malazem"].includes(currentRole) },
+    { id: "sections", label: "أقسام المادة (الرزم، الكتب...)", icon: "📂", isAllowed: (currentRole) => ["super_admin", "editor_full", "editor_malazem"].includes(currentRole) },
+    { id: "folders", label: "الملازم والدراسة", icon: "📂", isAllowed: (currentRole) => ["super_admin", "admin", "editor_full", ...materialsEditorRoles].includes(currentRole) },
+    { id: "lessons", label: "الدروس والإنجاز", icon: "✅", isAllowed: (currentRole) => contentEditorRoles.includes(currentRole) },
+    { id: "quotes", label: "العبارات التحفيزية", icon: "💬", isAllowed: (currentRole) => contentEditorRoles.includes(currentRole) },
+    { id: "foundation", label: "قسم التأسيس", icon: "🏗️", isAllowed: (currentRole) => ["super_admin", "admin", "editor_full", "editor_taasees"].includes(currentRole) },
+    { id: "news", label: "الأخبار", icon: "📰", isAllowed: (currentRole) => contentEditorRoles.includes(currentRole) },
+    { id: "announcements", label: "إشعارات وإعلانات فورية", icon: "📢", isAllowed: (currentRole) => contentEditorRoles.includes(currentRole) },
+    { id: "nav", label: "الصفحات والتنقل", icon: "🧭", isAllowed: (currentRole) => ["super_admin", "editor_full"].includes(currentRole) },
+    { id: "contact", label: "روابط التواصل", icon: "📞", isAllowed: (currentRole) => ["super_admin", "editor_full", "editor_news"].includes(currentRole) },
+    { id: "editors", label: "إدارة المحررين", icon: "🛡️", isAllowed: (currentRole) => ["super_admin", "admin"].includes(currentRole) },
+    { id: "password", label: "تغيير كلمة السر", icon: "🔐", isAllowed: (currentRole) => currentRole === "super_admin" },
   ];
 
-  const role = editorRole || "all";
   const isSectionAllowed = (id) => {
-    if (role === "custom") return Array.isArray(editorPermissions) && editorPermissions.includes(id);
-    return allAdminSections.find(s => s.id === id)?.roles.includes(role);
+    const sectionDefinition = allAdminSections.find(s => s.id === id);
+    if (!sectionDefinition) return false;
+    return sectionDefinition.isAllowed(role);
   };
-  const adminSections = allAdminSections.filter(s => isSectionAllowed(s.id));
+  const adminSections = (allAdminSections || []).filter(s => isSectionAllowed(s.id));
+  const mainMenuSections = (adminSections || []).filter((sectionItem) => !!sectionItem);
+  const safeMainMenuSections = (mainMenuSections && mainMenuSections.length > 0)
+    ? mainMenuSections
+    : ((adminSections && adminSections.length > 0) ? [adminSections[0]] : [{ id: "fallback", label: "لا توجد صلاحيات متاحة", icon: "⚠️" }]);
+
+  const handlePanelBack = () => {
+    if (activeSubSection) {
+      setActiveSubSection(null);
+      return;
+    }
+    if (section !== "main") {
+      setActiveSubSection(null);
+      setSection("main");
+      return;
+    }
+    onBack?.();
+  };
+
+  const handleContentBack = () => handlePanelBack();
 
   useEffect(() => {
+    if (section === "main" && adminSections.length > 0 && !contentOverviewRoles.includes(role) && !isMaterialsEditor) {
+      // Allow editor_malazem to remain on the main admin list without auto-navigation
+      // setSection(adminSections[0].id);
+      return;
+    }
     if (section !== "main" && !isSectionAllowed(section)) setSection("main");
-  }, [section, role]);
+  }, [section, role, adminSections.length, contentOverviewRoles, isMaterialsEditor]);
+
+  if (activeSubSection) {
+    if (activeSubSection === "lessons") return <AdminLessons config={config} saveConfig={saveConfig} T={T} onBack={handleContentBack} />;
+    if (activeSubSection === "quotes") return <AdminQuotes config={config} saveConfig={saveConfig} T={T} onBack={handleContentBack} />;
+    if (activeSubSection === "news") return <AdminNews config={config} saveConfig={saveConfig} T={T} onBack={handleContentBack} />;
+  }
 
   if (section !== "main" && isSectionAllowed(section)) {
-    if (section === "splash") return <AdminSplash config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "grades") return <AdminGrades config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "subjects") return <AdminSubjects config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "sections") return <AdminSections config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "folders") return <AdminFolders config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "lessons") return <AdminLessons config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "quotes") return <AdminQuotes config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "foundation") return <AdminFoundation config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "news") return <AdminNews config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "announcements") return <AdminAnnouncements config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "nav") return <AdminNav config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "contact") return <AdminContact config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "password") return <AdminPassword config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
-    if (section === "editors") return <AdminEditors config={config} saveConfig={saveConfig} T={T} onBack={() => setSection("main")} />;
+    if (section === "splash") return <AdminSplash config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "grades") return <AdminGrades config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "subjects") return <AdminSubjects config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "sections") return <AdminSections config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "folders") return <AdminFolders config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "lessons") return <AdminLessons config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "quotes") return <AdminQuotes config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "foundation") return <AdminFoundation config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "news") return <AdminNews config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "announcements") return <AdminAnnouncements config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "nav") return <AdminNav config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "contact") return <AdminContact config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
+    if (section === "password") return <AdminPassword config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} role={role} />;
+    if (section === "editors") return <AdminEditors config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} role={role} />;
   }
 
   return (
     <div className="app-shell" style={{ minHeight: "100vh", fontFamily: "'Cairo',sans-serif", direction: "rtl", paddingBottom: "30px" }}>
       <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: T.accent, fontSize: "15px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← خروج</button>
+        <button onClick={handlePanelBack} style={{ background: "transparent", border: "none", color: T.accent, fontSize: "15px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← خروج</button>
         <div>
           <h2 style={{ margin: 0, color: T.accent, fontSize: "20px", fontWeight: "800" }}>🛡️ لوحة الإدارة</h2>
           <p style={{ margin: 0, fontSize: "12px", color: T.subtext }}>سواعد الخير</p>
         </div>
       </div>
       <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-        {adminSections.map(s => (
-          <button key={s.id} onClick={() => setSection(s.id)} style={{ background: T.card, border: `1px solid ${s.id === "password" ? T.danger + "44" : T.cardBorder}`, borderRadius: "16px", padding: "16px", display: "flex", alignItems: "center", gap: "14px", cursor: "pointer", backdropFilter: "blur(10px)", textAlign: "right" }}>
+        {safeMainMenuSections.map(s => (
+          <button key={s.id} onClick={() => { setActiveSubSection(null); setSection(s.id); }} style={{ background: T.card, border: `1px solid ${s.id === "password" ? T.danger + "44" : T.cardBorder}`, borderRadius: "16px", padding: "16px", display: "flex", alignItems: "center", gap: "14px", cursor: "pointer", backdropFilter: "blur(10px)", textAlign: "right" }}>
             <span style={{ fontSize: "26px" }}>{s.icon}</span>
             <span style={{ fontSize: "15px", fontWeight: "600", color: s.id === "password" ? T.danger : T.text, flex: 1 }}>{s.label}</span>
             <span style={{ color: T.subtext }}>‹</span>
@@ -3312,10 +3384,22 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
 // ADMIN PASSWORD
 // ============================================================
 
-function AdminPassword({ config, saveConfig, T, onBack }) {
+function AdminPassword({ config, saveConfig, T, onBack, role }) {
   const OWNER_EMAIL = "sawaidualkhayri@gmail.com";
   const [step, setStep] = useState(1);
   const [sending, setSending] = useState(false);
+
+  if (role !== "super_admin") {
+    return (
+      <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
+        <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
+          <button onClick={onBack} style={{ background: "transparent", border: "none", color: T.accent, fontSize: "15px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← رجوع</button>
+          <h2 style={{ margin: 0, color: T.accent, fontSize: "18px", fontWeight: "800" }}>🔐 تغيير كلمة السر</h2>
+        </div>
+        <div style={{ padding: "20px", color: T.text }}>لا توجد صلاحية لإجراء هذه العملية لهذا الحساب.</div>
+      </div>
+    );
+  }
   const [code, setCode] = useState("");
   const [inputCode, setInputCode] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -3450,22 +3534,46 @@ function AdminGrades({ config, saveConfig, T, onBack }) {
 // ============================================================
 // ADMIN EDITORS — إدارة المحررين (للـ super فقط)
 // ============================================================
-function AdminEditors({ config, saveConfig, T, onBack }) {
+function AdminEditors({ config, saveConfig, T, onBack, role }) {
   const [editors, setEditors] = useState(config.editors || []);
-  const [form, setForm] = useState({ username: "", password: "", role: "notes", permissions: [] });
+  const [form, setForm] = useState({ username: "", email: "", password: "", role: "editor_malazem", permissions: [] });
   const [err, setErr] = useState("");
   const [flashSaved, setFlashSaved] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [editIdx, setEditIdx] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (role !== "super_admin") {
+    return (
+      <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
+        <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
+          <button onClick={onBack} style={{ background: "transparent", border: "none", color: T.accent, fontSize: "15px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← رجوع</button>
+          <h2 style={{ margin: 0, color: T.accent, fontSize: "18px", fontWeight: "800" }}>🛡️ إدارة المحررين</h2>
+        </div>
+        <div style={{ padding: "20px", color: T.text }}>لا توجد صلاحية لإدارة المحررين لهذا الحساب.</div>
+      </div>
+    );
+  }
 
   const ROLES = [
-    { value: "all",        label: "محرر كامل (كل الصلاحيات ما عدا إدارة المحررين)" },
-    { value: "admin",      label: "مسؤول (كل الصلاحيات + إدارة المحررين)" },
-    { value: "notes",      label: "الملازم فقط" },
-    { value: "foundation", label: "تأسيس فقط" },
-    { value: "content",    label: "أخبار + عبارات + دروس + إنجاز" },
-    { value: "custom",     label: "صلاحيات مخصّصة (اختر بنفسك)" },
+    { value: "super_admin", label: "مدير عام (كل الصلاحيات + إدارة المحررين)" },
+    { value: "editor_full", label: "محرر عام (كل أقسام المحتوى)" },
+    { value: "editor_malazem", label: "محرر سواعد الخير ملازم" },
+    { value: "editor_news", label: "محرر سواعد الخير تنسيق" },
+    { value: "editor_tasiss", label: "محرر سواعد الخير تأسيس" },
   ];
+
+  const normalizeEditorRoleValue = (roleValue) => {
+    const normalized = (roleValue || "").toString().trim().toLowerCase();
+    if (!normalized) return "editor_malazem";
+    if (normalized === "super_admin" || normalized === "admin") return "super_admin";
+    if (normalized === "editor_full" || normalized === "all") return "editor_full";
+    if (normalized === "editor_malazem" || normalized === "editor_materials" || normalized === "editor_study" || normalized === "notes") return "editor_malazem";
+    if (normalized === "editor_news" || normalized === "content") return "editor_news";
+    if (normalized === "editor_taasees" || normalized === "editor_tasiss" || normalized === "foundation") return "editor_tasiss";
+    return normalized;
+  };
 
   // القوائم المتاحة للتخصيص اليدوي — قسم "إدارة المحررين" غير متاح هنا عن قصد ليبقى حصرياً على دور "مسؤول"
   const PERMISSION_OPTIONS = [
@@ -3489,29 +3597,86 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
   const togglePermission = (list, id) => list.includes(id) ? list.filter(p => p !== id) : [...list, id];
 
   const roleLabel = (e) => {
-    if (e.role === "custom") {
+    const normalizedRole = normalizeUserRole(e.role);
+    if (normalizedRole === "custom") {
       const names = (e.permissions || []).map(p => PERMISSION_OPTIONS.find(o => o.id === p)?.label || p);
       return names.length ? `مخصّصة: ${names.join("، ")}` : "مخصّصة (بدون صلاحيات محددة)";
     }
-    return ROLES.find(r => r.value === e.role)?.label || e.role;
+    return ROLES.find(r => r.value === normalizedRole || (r.value === "editor_tasiss" && normalizedRole === "editor_taasees"))?.label || e.role;
+  };
+
+  const persistEditorToFirebase = async ({ username, email, role, uid }) => {
+    const trimmedUsername = (username || "").trim();
+    const persistedRole = (role || "").toString().trim();
+    const safeEmail = (email || "").trim() || `user_${encodeURIComponent(trimmedUsername).replace(/%/g, "").toLowerCase()}@sawaed.local`;
+    await setDoc(doc(db, "users", uid), {
+      uid,
+      username: trimmedUsername,
+      email: safeEmail,
+      role: persistedRole,
+      fullName: trimmedUsername,
+      displayName: trimmedUsername,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+    await setDoc(doc(db, "usernames", trimmedUsername.toLowerCase()), { uid, username: trimmedUsername, email: safeEmail, role: persistedRole }, { merge: true });
+    return safeEmail;
   };
 
   const addEditor = async () => {
     const uname = form.username.trim();
-    if (!uname || !form.password.trim()) { setErr("أدخل الاسم وكلمة السر"); return; }
+    const password = form.password.trim();
+    if (!uname || !password) { setErr("أدخل الاسم وكلمة السر"); return; }
+    if (password.length < 6) { setErr("كلمة السر يجب أن تكون 6 خانات على الأقل"); return; }
+    const selectedRole = normalizeEditorRoleValue(form.role);
+    if (!selectedRole) { setErr("اختر الدور"); return; }
     if (editors.some(e => normalizeUsername(e.username) === normalizeUsername(uname))) { setErr("الاسم موجود مسبقاً"); return; }
-    const newEditor = { username: uname, password: form.password.trim(), role: form.role, permissions: form.role === "custom" ? form.permissions : undefined };
+
+    setIsSubmitting(true);
+    setErr("");
+    const secondaryAuth = getEditorProvisioningAuth();
+    const safeEmail = (form.email.trim() || `user_${encodeURIComponent(uname).replace(/%/g, "").toLowerCase()}@sawaed.local`).trim();
+    const newEditor = { username: uname, email: safeEmail, password, role: selectedRole, permissions: [] };
     const updated = [...editors, newEditor];
     setEditors(updated);
-    await saveConfig({ ...config, editors: updated });
-    setForm({ username: "", password: "", role: "notes", permissions: [] });
-    setErr(""); setFlashSaved(true); setTimeout(() => setFlashSaved(false), 2000);
+
+    try {
+      let uid;
+      try {
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, safeEmail, password);
+        uid = userCredential.user?.uid;
+      } catch (error) {
+        if (error?.code === "auth/email-already-in-use") {
+          const existingCredential = await signInWithEmailAndPassword(secondaryAuth, safeEmail, password);
+          await updatePassword(existingCredential.user, password);
+          uid = existingCredential.user?.uid;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!uid) throw new Error("تعذر إنشاء حساب Firebase Auth للمحرر.");
+      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid });
+      await saveConfig({ ...config, editors: updated });
+      setForm({ username: "", email: "", password: "", role: "editor_malazem", permissions: [] });
+      setErr("");
+      setFlashSaved(true);
+      window.setTimeout(() => setFlashSaved(false), 2000);
+    } catch (error) {
+      console.error("Failed to create editor account", error);
+      setErr(error?.message || "تعذر إنشاء حساب المحرر.");
+      setEditors(editors);
+    } finally {
+      setIsSubmitting(false);
+      try { await signOut(secondaryAuth); } catch (cleanupError) { console.warn("Failed to clear secondary auth session", cleanupError); }
+    }
   };
 
   const removeEditor = async (idx) => {
     if (!window.confirm("حذف هذا المحرر؟")) return;
+    const editor = editors[idx];
     const updated = editors.filter((_, i) => i !== idx);
     setEditors(updated);
+    if (editor?.username) await deleteEditorAccount({ username: editor.username });
     await saveConfig({ ...config, editors: updated });
     if (editIdx === idx) { setEditIdx(null); setEditForm(null); }
   };
@@ -3522,15 +3687,72 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
     setErr("");
   };
 
-  const saveEdit = async () => {
+  const saveEdit = async (event) => {
+    event.preventDefault();
     const uname = editForm.username.trim();
-    if (!uname || !editForm.password.trim()) { setErr("أدخل الاسم وكلمة السر"); return; }
+    const password = editForm.password.trim();
+    if (!uname) { setErr("أدخل اسم المستخدم"); return; }
+    if (!password || password.length < 6) { setErr("كلمة السر يجب أن تكون 6 خانات على الأقل"); return; }
+    const selectedRole = normalizeEditorRoleValue(editForm.role);
+    if (!selectedRole) { setErr("اختر الدور"); return; }
     if (editors.some((e, i) => i !== editIdx && normalizeUsername(e.username) === normalizeUsername(uname))) { setErr("الاسم موجود مسبقاً لمحرر آخر"); return; }
+
+    setIsSubmitting(true);
+    setErr("");
+    const previousEditor = editors[editIdx];
     const updated = [...editors];
-    updated[editIdx] = { username: uname, password: editForm.password.trim(), role: editForm.role, permissions: editForm.role === "custom" ? editForm.permissions : undefined };
+    const safeEmail = (editForm.email?.trim() || `user_${encodeURIComponent(uname).replace(/%/g, "").toLowerCase()}@sawaed.local`).trim();
+    updated[editIdx] = { username: uname, email: safeEmail, password, role: selectedRole, permissions: [] };
     setEditors(updated);
-    await saveConfig({ ...config, editors: updated });
-    setEditIdx(null); setEditForm(null); setErr("");
+
+    const secondaryAuth = getEditorProvisioningAuth();
+    try {
+      let uid;
+      try {
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, safeEmail, password);
+        uid = userCredential.user?.uid;
+      } catch (error) {
+        if (error?.code === "auth/email-already-in-use") {
+          const previousPassword = previousEditor?.password || "";
+          const existingCredential = await signInWithEmailAndPassword(secondaryAuth, safeEmail, previousPassword || password);
+          await updatePassword(existingCredential.user, password);
+          uid = existingCredential.user?.uid;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!uid) throw new Error("تعذر تحديث حساب Firebase Auth للمحرر.");
+      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid });
+      await saveConfig({ ...config, editors: updated });
+      setEditIdx(null); setEditForm(null); setErr("");
+      setFlashSaved(true);
+      window.setTimeout(() => setFlashSaved(false), 2000);
+    } catch (error) {
+      console.error("Failed to save editor", error);
+      setErr(error?.message || "تعذر حفظ بيانات المحرر.");
+    } finally {
+      setIsSubmitting(false);
+      try { await signOut(secondaryAuth); } catch (cleanupError) { console.warn("Failed to clear secondary auth session", cleanupError); }
+    }
+  };
+
+  const runLegacyMigration = async () => {
+    if (!window.confirm("هل تريد تشغيل مزامنة ذكية وإزالة الحسابات القديمة غير النشطة؟")) return;
+    setMigrating(true);
+    setErr("");
+    try {
+      const result = await smartMigrateAndSync();
+      const mergedEditors = [...(config.editors || [])];
+      await saveConfig({ ...config, editors: mergedEditors });
+      setEditors(mergedEditors);
+      setErr(`تمت المزامنة بنجاح. تمت معالجة ${result.results.length} حساباً نشطاً، وتم حذف ${result.removedEntries.length + result.cleanedCount} عناصر قديمة.`);
+    } catch (error) {
+      console.error("Smart sync failed", error);
+      setErr(error?.message || "تعذر تشغيل المزامنة الذكية.");
+    } finally {
+      setMigrating(false);
+    }
   };
 
   return (
@@ -3545,6 +3767,7 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
             {editIdx === i ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 <input value={editForm.username} onChange={ev => setEditForm(f => ({ ...f, username: ev.target.value }))} placeholder="اسم المستخدم" style={inp} />
+                <input value={editForm.email || ""} onChange={ev => setEditForm(f => ({ ...f, email: ev.target.value }))} placeholder="البريد الإلكتروني (اختياري)" style={inp} />
                 <input value={editForm.password} onChange={ev => setEditForm(f => ({ ...f, password: ev.target.value }))} placeholder="كلمة السر" style={inp} />
                 <select value={editForm.role} onChange={ev => setEditForm(f => ({ ...f, role: ev.target.value }))} style={inp}>
                   {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -3561,7 +3784,7 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
                 )}
                 {err && <p style={{ color: T.danger, fontSize: "12px", margin: 0 }}>{err}</p>}
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <button onClick={saveEdit} style={{ flex: 1, background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px", cursor: "pointer", fontWeight: "700", fontFamily: "'Cairo',sans-serif" }}>✅ حفظ</button>
+                  <button onClick={(event) => saveEdit(event)} disabled={isSubmitting} style={{ flex: 1, background: isSubmitting ? "#6b7280" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px", cursor: isSubmitting ? "not-allowed" : "pointer", fontWeight: "700", fontFamily: "'Cairo',sans-serif" }}>{isSubmitting ? "⏳ جاري الحفظ..." : "✅ حفظ"}</button>
                   <button onClick={() => { setEditIdx(null); setEditForm(null); setErr(""); }} style={{ flex: 1, background: "transparent", border: `1px solid ${T.cardBorder}`, color: T.subtext, borderRadius: "10px", padding: "10px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>إلغاء</button>
                 </div>
               </div>
@@ -3569,7 +3792,7 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <div style={{ flex: 1 }}>
                   <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "14px" }}>{e.username}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: T.subtext }}>{roleLabel(e)} · كلمة السر: {e.password}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: T.subtext }}>{roleLabel(e)} · كلمة السر: {e.password}{e.email ? ` · البريد: ${e.email}` : ""}</p>
                 </div>
                 <button onClick={() => startEdit(i)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px" }}>✏️</button>
                 <button onClick={() => removeEditor(i)} style={{ background: "#e5533318", color: "#e55333", border: "1px solid #e5533340", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", fontFamily: "'Cairo',sans-serif" }}>🗑️ حذف</button>
@@ -3579,7 +3802,11 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
         ))}
         <h3 style={{ color: T.text, margin: "16px 0 10px", fontSize: "15px" }}>➕ إضافة محرر جديد</h3>
         <div style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+          <button onClick={runLegacyMigration} disabled={migrating} style={{ background: migrating ? "#6b7280" : `linear-gradient(135deg,#16a34a,#15803d)`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: migrating ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+            {migrating ? "جاري التفعيل والترحيل..." : "تفعيل وترحيل الحسابات إلى Firebase Auth"}
+          </button>
           <input value={form.username} onChange={e => { setForm(f => ({ ...f, username: e.target.value })); setErr(""); }} placeholder="اسم المستخدم للمحرر" style={inp} />
+          <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="البريد الإلكتروني (اختياري)" style={inp} />
           <input value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="كلمة السر" style={inp} />
           <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} style={inp}>
             {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -3595,8 +3822,8 @@ function AdminEditors({ config, saveConfig, T, onBack }) {
             </div>
           )}
           {err && <p style={{ color: T.danger, fontSize: "12px", margin: 0 }}>{err}</p>}
-          <button onClick={addEditor} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
-            {flashSaved ? "✅ تم الحفظ!" : "إضافة محرر"}
+          <button onClick={addEditor} disabled={isSubmitting} style={{ background: isSubmitting ? "#6b7280" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: isSubmitting ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+            {isSubmitting ? "⏳ جاري الحفظ..." : flashSaved ? "✅ تم الحفظ!" : "إضافة محرر"}
           </button>
         </div>
       </div>

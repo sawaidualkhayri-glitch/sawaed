@@ -1,5 +1,5 @@
 // src/firebase.js
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
@@ -14,10 +14,18 @@ const firebaseConfig = {
 };
 
 // تهيئة تطبيق الفايربيس
-const app = initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 // تصدير خدمات الحسابات وقاعدة البيانات لاستخدامها في المكونات
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 export const db = getFirestore(app);
+
+export const getEditorProvisioningAuth = () => {
+  const existing = getApps().find((candidate) => candidate.name === "editor-provisioning");
+  if (existing) return getAuth(existing);
+  const editorApp = initializeApp(firebaseConfig, "editor-provisioning");
+  return getAuth(editorApp);
+};
+
 export default app;
