@@ -6,7 +6,7 @@ import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
 import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMalazem, canManageTaasees, canManageNews } from "./AuthContext.jsx";
 import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded, deleteEditorAccount, smartMigrateAndSync } from "./firebaseAuth";
-import { db, getEditorProvisioningAuth } from "./firebase";
+import { db, getEditorProvisioningAuth, firebaseConfig } from "./firebase";
 
 // Use a locally served pdf.worker to guarantee offline rendering in the PWA.
 // Place a copy of the pdf.worker script at `public/pdf.worker.min.js` (from pdfjs-dist)
@@ -375,23 +375,10 @@ function resetNav() {
 }
 
 // ============================================================
-// FIREBASE CONFIG
-// ============================================================
-
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCUK5D8fCqxlDPk5_4u_HZBt0-j_QCE_gc",
-  authDomain: "sawaidualkhayr.firebaseapp.com",
-  projectId: "sawaidualkhayr",
-  storageBucket: "sawaidualkhayr.firebasestorage.app",
-  messagingSenderId: "504547862189",
-  appId: "1:504547862189:web:aae65198e304894c7c0824",
-};
-
-// ============================================================
 // FIREBASE SDK OVER FETCH SIMULATION
 // ============================================================
 
-const FB_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
+const FB_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
 
 async function fbGet(collection, docId) {
   try {
@@ -609,17 +596,11 @@ const DEFAULT_CONFIG = {
   savedCategories: ["مميز بنجمة"],
   savedTypes: ["ملف من المواد", "روابط من أي مكان", "خبر من الأخبار", "ملفات من التأسيس"],
   contactLinks: [{ label: "تواصل معنا عبر واتساب", url: "https://whatsapp.com/channel/0029VbCYtmCKwqSKQllr5w3p", icon: "💬" }],
-  adminPassword: "2027",
+  adminPassword: import.meta.env.VITE_ADMIN_PASSWORD ?? "",
   // ============================================================
   // حسابات المحررين الافتراضية (يمكن للمحرر "admin" فقط إضافة/حذف محررين)
   // ============================================================
-  editors: [
-    { username: "محرر سواعد الخير 1", password: "34778", role: "editor_full" },
-    { username: "Nadosh The Top", password: "hello its me", role: "super_admin" },
-    { username: "محرر سواعد الخير ملازم 2", password: "732663", role: "editor_malazem" },
-    { username: "محرر سواعد الخير تأسيس 3", password: "84473", role: "editor_taasees" },
-    { username: "محرر سواعد الخير تنسيق 4", password: "368784", role: "editor_news" },
-  ],
+  editors: [],
 };
 
 // ============================================================
