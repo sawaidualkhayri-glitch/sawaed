@@ -1,7 +1,8 @@
 // src/offlineHandler.js
 
-// ⚠️ استبدل هذا الرابط برابط الوركر الخاص بك على Cloudflare
-const WORKER_URL = "https://sawaed.hamodemsg.workers.dev/";
+import { cloudflareWorkerBaseUrl } from "./config";
+
+const WORKER_URL = `${cloudflareWorkerBaseUrl}/`;
 const CACHE_DB_NAME = "sawaed_offline_cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE = "cache";

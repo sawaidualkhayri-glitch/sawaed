@@ -5,8 +5,10 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firest
 import { auth, db } from "./firebase";
 import { logoutUser } from "./firebaseAuth";
 import { cacheJson, clearCachedJson, getCachedJson } from "./offlineHandler";
+import { ALL_EDITOR_ROLES } from "./constants";
 
 const AuthContext = createContext(null);
+const MASTER_ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
 
 export function normalizeUserRole(role) {
   const normalized = (role || "").trim();
@@ -35,8 +37,6 @@ export function normalizeUserRole(role) {
       return normalized || "user";
   }
 }
-
-export const ALL_EDITOR_ROLES = ["super_admin", "admin", "editor_full", "editor_malazem", "editor_taasees", "editor_news"];
 
 export const isAnyEditor = (role) => ALL_EDITOR_ROLES.includes(normalizeUserRole(role));
 export const canManageEditors = (role) => ["super_admin", "admin"].includes(normalizeUserRole(role));
@@ -92,6 +92,11 @@ export function AuthProvider({ children }) {
 
   const applyUserProfile = useCallback((profile, incomingFirebaseUser = null) => {
     const safeUser = buildUserProfile(incomingFirebaseUser || { uid: profile?.uid || profile?.id || "", email: profile?.email || "", displayName: profile?.displayName || profile?.fullName || "" }, profile || {});
+    // Force master UID to always be super_admin in client state
+    if (safeUser?.uid === MASTER_ADMIN_UID) {
+      safeUser.role = "super_admin";
+      safeUser.isAdmin = true;
+    }
     setCurrentUser(safeUser);
     setNeedsOnboarding(shouldRequireOnboarding(safeUser, safeUser.role));
     try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch (error) { console.warn("Failed to cache user locally:", error); }
@@ -174,6 +179,11 @@ export function AuthProvider({ children }) {
         return;
       }
 
+      if (!user || !user.uid) {
+        setAuthLoading(false);
+        return;
+      }
+
       try {
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
@@ -201,16 +211,23 @@ export function AuthProvider({ children }) {
           await setDoc(userRef, profile);
         } else {
           const updateData = {};
-          if (!profile.role) updateData.role = "user";
           if (!profile.stream && profile.branch) updateData.stream = profile.branch;
           if (!profile.branch && profile.stream) updateData.branch = profile.stream;
           if (Object.keys(updateData).length > 0) {
-            await setDoc(userRef, updateData, { merge: true });
-            profile = { ...profile, ...updateData };
+            try {
+              await setDoc(userRef, updateData, { merge: true });
+              profile = { ...profile, ...updateData };
+            } catch (updateError) {
+              console.warn("Failed to merge missing fields into user profile", updateError);
+            }
           }
         }
 
-        const safeUser = buildUserProfile(user, profile);
+        let safeUser = buildUserProfile(user, profile);
+        if (safeUser?.uid === MASTER_ADMIN_UID) {
+          safeUser.role = "super_admin";
+          safeUser.isAdmin = true;
+        }
         setCurrentUser(safeUser);
         setNeedsOnboarding(shouldRequireOnboarding(safeUser, safeUser.role));
         try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch (error) { console.warn("Failed to cache user locally:", error); }
@@ -264,24 +281,42 @@ export function AuthProvider({ children }) {
 
     const uid = firebaseUser.uid;
     const userRef = doc(db, "users", uid);
-    await updateDoc(userRef, {
+    const updatePayload = {
       ...normalizedData,
       profileCompleted: updated.profileCompleted,
       grade: updated.grade,
       branch: updated.branch,
       stream: updated.stream,
       updatedAt: serverTimestamp(),
-    });
+    };
+
+    if (!isAdmin && Object.prototype.hasOwnProperty.call(updatePayload, "role")) {
+      delete updatePayload.role;
+    }
+
+    try {
+      await updateDoc(userRef, updatePayload);
+    } catch (updateError) {
+      console.error("Failed to update user profile document", updateError);
+      if (updateError?.code === "permission-denied") {
+        throw new Error("لا توجد صلاحية لتحديث ملف المستخدم.");
+      }
+      throw updateError;
+    }
 
     const username = (updated.username || updated.displayName || updated.fullName || currentUser?.username || currentUser?.displayName || "").toString().trim();
     if (username) {
-      await setDoc(doc(db, "usernames", username.toLowerCase()), {
-        uid,
-        grade: updated.grade,
-        branch: updated.branch,
-        stream: updated.stream,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      try {
+        await setDoc(doc(db, "usernames", username.toLowerCase()), {
+          uid,
+          grade: updated.grade,
+          branch: updated.branch,
+          stream: updated.stream,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (usernameError) {
+        console.error("Failed to update username lookup", usernameError);
+      }
     }
 
     return updated;

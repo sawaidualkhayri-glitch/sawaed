@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { pdfjs } from "react-pdf";
 import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
+const MASTER_ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
 import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMalazem, canManageTaasees, canManageNews } from "./AuthContext.jsx";
-import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded, deleteEditorAccount, smartMigrateAndSync } from "./firebaseAuth";
-import { db, getEditorProvisioningAuth, firebaseConfig } from "./firebase";
+import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded } from "./firebaseAuth";
+import { db, getEditorProvisioningAuth, firebaseConfig, auth } from "./firebase";
+import { cloudflareWorkerBaseUrl } from "./config";
 
 // Use a locally served pdf.worker to guarantee offline rendering in the PWA.
 // Place a copy of the pdf.worker script at `public/pdf.worker.min.js` (from pdfjs-dist)
@@ -154,7 +156,7 @@ function extractDriveId(url) {
 // بدلاً من التمدد حافة لحافة أو البقاء بعرض هاتف ثابت
 const APP_MAX_WIDTH = "1200px";
 
-const CF_WORKER_URL = "https://sawaed.hamodemsg.workers.dev/";
+const CF_WORKER_URL = `${cloudflareWorkerBaseUrl}/`;
 
 function driveDownloadUrl(url) {
   const id = extractDriveId(url);
@@ -648,7 +650,7 @@ export default function App() {
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
   const rawRole = (currentUser?.role || "user").toString().trim().toLowerCase();
-  const isFullAdmin = role === "super_admin" || rawRole === "admin";
+  const isFullAdmin = role === "super_admin" || rawRole === "admin" || auth?.currentUser?.uid === MASTER_ADMIN_UID;
   const isAdminLike = isFullAdmin || ["editor_full", "editor_malazem", "editor_news", "editor_taasees"].includes(role);
   const [activePage, setActivePage] = useState("home");
   const [quoteIdx, setQuoteIdx] = useState(0);
@@ -663,13 +665,6 @@ export default function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const T = darkMode ? DARK : LIGHT;
-
-  useEffect(() => {
-    const editorsToSeed = (config.editors && config.editors.length > 0 ? config.editors : DEFAULT_CONFIG.editors) || [];
-    ensureEditorAccountsSeeded(editorsToSeed).catch((error) => {
-      console.error("Failed to seed editor accounts:", error);
-    });
-  }, [config.editors]);
 
   // Sync a theme class on the document element so native widgets (select/options) can be themed via CSS
   useEffect(() => {
@@ -1978,7 +1973,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const isEditor = isEditorSession;
   // محرر كامل / مسؤول (admin) لهما صلاحية كاملة على كل شيء، ومحرر "الملازم" له صلاحية إدارة الملفات والمجلدات فقط
   // كما تُحترم الصلاحيات المخصّصة (custom permissions) التي يضبطها المسؤول لكل محرر على حدة
-  const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem");
+  const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem" || auth?.currentUser?.uid === MASTER_ADMIN_UID);
 
   const saveFolderData = async (newData) => {
     const newConfig = { ...config, [storageKey]: JSON.stringify(newData) };
@@ -2036,8 +2031,19 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       setUploading(false);
       return;
     }
-    const fileType = pendingUploadFile.type.includes("pdf") ? "pdf" : pendingUploadFile.type.includes("image") ? "image" : "link";
-    setForm(f => ({ ...f, title: f.title || pendingUploadFile.name.replace(/\.[^/.]+$/, ""), url: driveLink.trim(), type: fileType }));
+
+    const fileType = pendingUploadFile.type?.includes("pdf")
+      ? "pdf"
+      : pendingUploadFile.type?.includes("image")
+        ? "image"
+        : "link";
+    const normalizedUrl = driveLink.trim();
+    setForm((f) => ({
+      ...f,
+      title: f.title || pendingUploadFile?.name?.replace(/\.[^/.]+$/, "") || "مورد جديد",
+      url: normalizedUrl,
+      type: fileType,
+    }));
     setPendingUploadFile(null);
     setDriveLink("");
     setShowDriveLinkModal(false);
@@ -2175,15 +2181,18 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-    setUploadPct(0);
+    setUploadPct(100);
     setPendingUploadFile(file);
     setDriveLink("");
     setShowDriveLinkModal(true);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const addResource = async () => {
     if (!form.title || !form.url) return;
-    const newItems = [...currentItems, { ...form }];
+    const normalizedUrl = form.url.trim();
+    const newItem = { ...form, url: normalizedUrl, title: form.title.trim() };
+    const newItems = [...currentItems, newItem];
     await saveCurrentItems(newItems);
     setForm({ title: "", url: "", description: "", type: "link" });
   };
@@ -3208,7 +3217,7 @@ function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermiss
   const isSectionAllowed = (id) => {
     const sectionDefinition = allAdminSections.find(s => s.id === id);
     if (!sectionDefinition) return false;
-    return sectionDefinition.isAllowed(role);
+    return sectionDefinition.isAllowed(role) || auth?.currentUser?.uid === MASTER_ADMIN_UID;
   };
   const adminSections = (allAdminSections || []).filter(s => isSectionAllowed(s.id));
   const mainMenuSections = (adminSections || []).filter((sectionItem) => !!sectionItem);
@@ -3370,7 +3379,7 @@ function AdminPassword({ config, saveConfig, T, onBack, role }) {
   const [step, setStep] = useState(1);
   const [sending, setSending] = useState(false);
 
-  if (role !== "super_admin") {
+  if (role !== "super_admin" && auth?.currentUser?.uid !== MASTER_ADMIN_UID) {
     return (
       <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
         <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -3516,16 +3525,102 @@ function AdminGrades({ config, saveConfig, T, onBack }) {
 // ADMIN EDITORS — إدارة المحررين (للـ super فقط)
 // ============================================================
 function AdminEditors({ config, saveConfig, T, onBack, role }) {
-  const [editors, setEditors] = useState(config.editors || []);
+  const [editors, setEditors] = useState([]);
+  const [loadingEditors, setLoadingEditors] = useState(true);
   const [form, setForm] = useState({ username: "", email: "", password: "", role: "editor_malazem", permissions: [] });
   const [err, setErr] = useState("");
+  const [fetchError, setFetchError] = useState("");
   const [flashSaved, setFlashSaved] = useState(false);
-  const [migrating, setMigrating] = useState(false);
   const [editIdx, setEditIdx] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [usernamesLoaded, setUsernamesLoaded] = useState(false);
+  const { currentUser: localCurrentUser, authLoading: localAuthLoading } = useAuth();
+  const isAdminSession = role === "super_admin" || role === "admin" || localCurrentUser?.uid === MASTER_ADMIN_UID || (localCurrentUser?.email || "").toLowerCase() === "nadahindi301@gmail.com";
 
-  if (role !== "super_admin") {
+  useEffect(() => {
+    if (typeof localAuthLoading !== "undefined" && localAuthLoading) return;
+    if (!localCurrentUser?.uid) {
+      if (!localAuthLoading) {
+        console.warn("Auth resolved but no currentUser.uid — editors fetch skipped");
+      }
+      return;
+    }
+    if (!["super_admin","admin"].includes(role) && localCurrentUser?.uid !== MASTER_ADMIN_UID) return;
+
+    const editorRoles = ["super_admin", "admin", "editor_full", "editor_malazem", "editor_taasees", "editor_news"];
+    let usernamesData = [];
+    let usernamesUnsubscribe = null;
+    let hasUpdatedEditors = false;
+
+    const mergeEditorResults = () => {
+      const map = new Map();
+
+      usernamesData.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        const roleValue = (data.role || "user").toString().trim().toLowerCase();
+        if (!editorRoles.includes(normalizeUserRole(roleValue)) && !editorRoles.includes(roleValue)) return;
+
+        const key = data.uid || docSnap.id;
+        const entry = {
+          id: docSnap.id,
+          uid: data.uid || key,
+          username: data.username || docSnap.id,
+          email: data.email || "",
+          password: data.password || "",
+          role: data.role || "user",
+          permissions: Array.isArray(data.permissions) ? data.permissions : [],
+          fullName: data.fullName || data.displayName || data.username || docSnap.id,
+          displayName: data.displayName || data.fullName || data.username || docSnap.id,
+        };
+        map.set(key, entry);
+      });
+
+      const merged = Array.from(map.values());
+      setEditors(merged);
+      setFetchError("");
+      if (usernamesLoaded) {
+        setLoadingEditors(false);
+      }
+      hasUpdatedEditors = true;
+    };
+
+    const trySyncUserDoc = () => {
+      void (async () => {
+        try {
+          await setDoc(doc(db, "users", localCurrentUser.uid), {
+            uid: localCurrentUser.uid,
+            email: localCurrentUser.email || "",
+            displayName: localCurrentUser.displayName || localCurrentUser.username || "",
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        } catch (syncErr) {
+          console.warn("Non-blocking super_admin user sync failed", syncErr?.code, syncErr?.message, syncErr);
+        }
+      })();
+    };
+
+    console.log("Fetching editors — auth.uid:", auth?.currentUser?.uid, "activeRole:", role, "currentUser.uid:", localCurrentUser?.uid);
+    trySyncUserDoc();
+
+    usernamesUnsubscribe = onSnapshot(collection(db, "usernames"), (snapshot) => {
+      usernamesData = snapshot.docs;
+      setUsernamesLoaded(true);
+      setFetchError("");
+      mergeEditorResults();
+      setLoadingEditors(false);
+    }, (snapshotError) => {
+      console.error("Failed to load usernames from Firestore", snapshotError?.code, snapshotError?.message, snapshotError);
+      setFetchError("تعذر تحميل قائمة المحررين من Firestore.");
+      setLoadingEditors(false);
+    });
+
+    return () => {
+      if (usernamesUnsubscribe) usernamesUnsubscribe();
+    };
+  }, [role, localAuthLoading, localCurrentUser]);
+
+  if (role !== "super_admin" && localCurrentUser?.uid !== MASTER_ADMIN_UID) {
     return (
       <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
         <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -3552,8 +3647,27 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     if (normalized === "editor_full" || normalized === "all") return "editor_full";
     if (normalized === "editor_malazem" || normalized === "editor_materials" || normalized === "editor_study" || normalized === "notes") return "editor_malazem";
     if (normalized === "editor_news" || normalized === "content") return "editor_news";
-    if (normalized === "editor_taasees" || normalized === "editor_tasiss" || normalized === "foundation") return "editor_tasiss";
+    if (normalized === "editor_taasees" || normalized === "editor_tasiss" || normalized === "foundation") return "editor_taasees";
     return normalized;
+  };
+
+  const getRoleDescription = (role) => {
+    const normalized = (role || "").toString().trim().toLowerCase();
+    switch (normalized) {
+      case "super_admin":
+        return "مدير عام (إدارة المحررين + التحكم الكامل بالمنصة)";
+      case "editor_full":
+        return "محرر عام (إضافة وتعديل لكافة الأقسام بدون إدارة المحررين)";
+      case "editor_taasees":
+      case "editor_tasiss":
+        return "محرر قسم التأسيس فقط";
+      case "editor_malazem":
+        return "محرر قسم الملازم فقط";
+      case "editor_news":
+        return "محرر سواعد الخير تنسيق";
+      default:
+        return "مستخدم / لا توجد صلاحيات تحرير";
+    }
   };
 
   // القوائم المتاحة للتخصيص اليدوي — قسم "إدارة المحررين" غير متاح هنا عن قصد ليبقى حصرياً على دور "مسؤول"
@@ -3575,6 +3689,15 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px 14px", fontSize: "14px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
 
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const isValidEmail = (email) => EMAIL_REGEX.test((email || "").trim().toLowerCase());
+  const getSafeEmail = (username, email = "") => {
+    const trimmedEmail = (email || "").trim().toLowerCase();
+    if (trimmedEmail && isValidEmail(trimmedEmail)) return trimmedEmail;
+    const safeUsername = (username || "").trim().replace(/[^a-zA-Z0-9._-]+/g, "_").toLowerCase().slice(0, 40) || "user";
+    return `${safeUsername}@sawaed.local`;
+  };
+
   const togglePermission = (list, id) => list.includes(id) ? list.filter(p => p !== id) : [...list, id];
 
   const roleLabel = (e) => {
@@ -3586,24 +3709,55 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     return ROLES.find(r => r.value === normalizedRole || (r.value === "editor_tasiss" && normalizedRole === "editor_taasees"))?.label || e.role;
   };
 
-  const persistEditorToFirebase = async ({ username, email, role, uid }) => {
+  const persistEditorToFirebase = async ({ username, email, role, uid, permissions = [], password = "" }) => {
+    if (!isAdminSession) {
+      throw new Error("غير مسموح: يجب أن يكون المستخدم مشرفًا عامًا لإنشاء أو تعديل محرر.");
+    }
+
     const trimmedUsername = (username || "").trim();
     const persistedRole = (role || "").toString().trim();
-    const safeEmail = (email || "").trim() || `user_${encodeURIComponent(trimmedUsername).replace(/%/g, "").toLowerCase()}@sawaed.local`;
-    await setDoc(doc(db, "users", uid), {
-      uid,
-      username: trimmedUsername,
-      email: safeEmail,
-      role: persistedRole,
-      fullName: trimmedUsername,
-      displayName: trimmedUsername,
-      createdAt: serverTimestamp(),
-    }, { merge: true });
-    await setDoc(doc(db, "usernames", trimmedUsername.toLowerCase()), { uid, username: trimmedUsername, email: safeEmail, role: persistedRole }, { merge: true });
+    const safeEmail = getSafeEmail(trimmedUsername, email);
+
+    try {
+      await setDoc(doc(db, "users", uid), {
+        uid,
+        username: trimmedUsername,
+        email: safeEmail,
+        password: password,
+        role: persistedRole,
+        fullName: trimmedUsername,
+        displayName: trimmedUsername,
+        permissions: Array.isArray(permissions) ? permissions : [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch (writeUsersError) {
+      console.error("Failed to write user profile", writeUsersError);
+      if (writeUsersError?.code === "permission-denied") {
+        throw new Error("لا توجد صلاحية لحفظ المستخدم في مجموعة users.");
+      }
+      throw new Error("تعذر حفظ بيانات المستخدم في مجموعة users.");
+    }
+
+    try {
+      await setDoc(doc(db, "usernames", trimmedUsername.toLowerCase()), { uid, username: trimmedUsername, email: safeEmail, role: persistedRole, password: password }, { merge: true });
+    } catch (writeUsernamesError) {
+      console.error("Failed to write username lookup", writeUsernamesError);
+      if (writeUsernamesError?.code === "permission-denied") {
+        throw new Error("لا توجد صلاحية لحفظ اسم المستخدم في مجموعة usernames.");
+      }
+      throw new Error("تعذر حفظ بيانات البحث عن اسم المستخدم في مجموعة usernames.");
+    }
+
     return safeEmail;
   };
 
   const addEditor = async () => {
+    if (!isAdminSession) {
+      setErr("غير مسموح: يجب أن يكون المستخدم مشرفًا عامًا لإنشاء محرر.");
+      return;
+    }
+
     const uname = form.username.trim();
     const password = form.password.trim();
     if (!uname || !password) { setErr("أدخل الاسم وكلمة السر"); return; }
@@ -3615,10 +3769,7 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     setIsSubmitting(true);
     setErr("");
     const secondaryAuth = getEditorProvisioningAuth();
-    const safeEmail = (form.email.trim() || `user_${encodeURIComponent(uname).replace(/%/g, "").toLowerCase()}@sawaed.local`).trim();
-    const newEditor = { username: uname, email: safeEmail, password, role: selectedRole, permissions: [] };
-    const updated = [...editors, newEditor];
-    setEditors(updated);
+    const safeEmail = getSafeEmail(uname, form.email);
 
     try {
       let uid;
@@ -3636,8 +3787,7 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
       }
 
       if (!uid) throw new Error("تعذر إنشاء حساب Firebase Auth للمحرر.");
-      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid });
-      await saveConfig({ ...config, editors: updated });
+      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid, permissions: [], password });
       setForm({ username: "", email: "", password: "", role: "editor_malazem", permissions: [] });
       setErr("");
       setFlashSaved(true);
@@ -3645,7 +3795,6 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     } catch (error) {
       console.error("Failed to create editor account", error);
       setErr(error?.message || "تعذر إنشاء حساب المحرر.");
-      setEditors(editors);
     } finally {
       setIsSubmitting(false);
       try { await signOut(secondaryAuth); } catch (cleanupError) { console.warn("Failed to clear secondary auth session", cleanupError); }
@@ -3654,12 +3803,28 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
 
   const removeEditor = async (idx) => {
     if (!window.confirm("حذف هذا المحرر؟")) return;
+    if (!isAdminSession) {
+      setErr("غير مسموح: يجب أن يكون المستخدم مشرفًا عامًا لحذف محرر.");
+      return;
+    }
     const editor = editors[idx];
-    const updated = editors.filter((_, i) => i !== idx);
-    setEditors(updated);
-    if (editor?.username) await deleteEditorAccount({ username: editor.username });
-    await saveConfig({ ...config, editors: updated });
-    if (editIdx === idx) { setEditIdx(null); setEditForm(null); }
+    if (!editor?.uid) return;
+
+    try {
+      await deleteDoc(doc(db, "users", editor.uid));
+      await deleteDoc(doc(db, "usernames", normalizeUsername(editor.username).toLowerCase()));
+      const updatedEditors = editors.filter((_, i) => i !== idx);
+      setEditors(updatedEditors);
+      if (editIdx === idx) { setEditIdx(null); setEditForm(null); }
+      setErr("");
+    } catch (error) {
+      console.error("Failed to delete editor", error);
+      if (error?.code === "permission-denied") {
+        setErr("لا توجد صلاحية لحذف المحرر.");
+      } else {
+        setErr(error?.message || "تعذر حذف المحرر.");
+      }
+    }
   };
 
   const startEdit = (i) => {
@@ -3670,10 +3835,14 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
 
   const saveEdit = async (event) => {
     event.preventDefault();
+    if (!isAdminSession) {
+      setErr("غير مسموح: يجب أن يكون المستخدم مشرفًا عامًا لتعديل محرر.");
+      return;
+    }
     const uname = editForm.username.trim();
-    const password = editForm.password.trim();
+    const password = (editForm.password || "").trim();
     if (!uname) { setErr("أدخل اسم المستخدم"); return; }
-    if (!password || password.length < 6) { setErr("كلمة السر يجب أن تكون 6 خانات على الأقل"); return; }
+    if (password && password.length < 6) { setErr("كلمة السر يجب أن تكون 6 خانات على الأقل"); return; }
     const selectedRole = normalizeEditorRoleValue(editForm.role);
     if (!selectedRole) { setErr("اختر الدور"); return; }
     if (editors.some((e, i) => i !== editIdx && normalizeUsername(e.username) === normalizeUsername(uname))) { setErr("الاسم موجود مسبقاً لمحرر آخر"); return; }
@@ -3681,32 +3850,30 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     setIsSubmitting(true);
     setErr("");
     const previousEditor = editors[editIdx];
-    const updated = [...editors];
-    const safeEmail = (editForm.email?.trim() || `user_${encodeURIComponent(uname).replace(/%/g, "").toLowerCase()}@sawaed.local`).trim();
-    updated[editIdx] = { username: uname, email: safeEmail, password, role: selectedRole, permissions: [] };
-    setEditors(updated);
+    const uid = previousEditor.uid;
+    const safeEmail = getSafeEmail(uname, editForm.email);
+    const updatedEditor = { ...previousEditor, username: uname, email: safeEmail, role: selectedRole, permissions: [] };
 
-    const secondaryAuth = getEditorProvisioningAuth();
     try {
-      let uid;
-      try {
-        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, safeEmail, password);
-        uid = userCredential.user?.uid;
-      } catch (error) {
-        if (error?.code === "auth/email-already-in-use") {
-          const previousPassword = previousEditor?.password || "";
-          const existingCredential = await signInWithEmailAndPassword(secondaryAuth, safeEmail, previousPassword || password);
-          await updatePassword(existingCredential.user, password);
-          uid = existingCredential.user?.uid;
-        } else {
-          throw error;
+      if (!uid) throw new Error("تعذر تحديد معرف المستخدم للمحرر.");
+      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid, permissions: [], password: (editForm.password || "") });
+
+      const previousUsernameKey = normalizeUsername(previousEditor.username).toLowerCase();
+      const nextUsernameKey = normalizeUsername(uname).toLowerCase();
+      if (previousUsernameKey && previousUsernameKey !== nextUsernameKey) {
+        try {
+          await deleteDoc(doc(db, "usernames", previousUsernameKey));
+        } catch (deleteOldNameError) {
+          console.warn("Failed to delete old username lookup", deleteOldNameError);
         }
       }
 
-      if (!uid) throw new Error("تعذر تحديث حساب Firebase Auth للمحرر.");
-      await persistEditorToFirebase({ username: uname, email: safeEmail, role: selectedRole, uid });
-      await saveConfig({ ...config, editors: updated });
-      setEditIdx(null); setEditForm(null); setErr("");
+      const updatedEditors = [...editors];
+      updatedEditors[editIdx] = updatedEditor;
+      setEditors(updatedEditors);
+      setEditIdx(null);
+      setEditForm(null);
+      setErr("");
       setFlashSaved(true);
       window.setTimeout(() => setFlashSaved(false), 2000);
     } catch (error) {
@@ -3714,25 +3881,6 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
       setErr(error?.message || "تعذر حفظ بيانات المحرر.");
     } finally {
       setIsSubmitting(false);
-      try { await signOut(secondaryAuth); } catch (cleanupError) { console.warn("Failed to clear secondary auth session", cleanupError); }
-    }
-  };
-
-  const runLegacyMigration = async () => {
-    if (!window.confirm("هل تريد تشغيل مزامنة ذكية وإزالة الحسابات القديمة غير النشطة؟")) return;
-    setMigrating(true);
-    setErr("");
-    try {
-      const result = await smartMigrateAndSync();
-      const mergedEditors = [...(config.editors || [])];
-      await saveConfig({ ...config, editors: mergedEditors });
-      setEditors(mergedEditors);
-      setErr(`تمت المزامنة بنجاح. تمت معالجة ${result.results.length} حساباً نشطاً، وتم حذف ${result.removedEntries.length + result.cleanedCount} عناصر قديمة.`);
-    } catch (error) {
-      console.error("Smart sync failed", error);
-      setErr(error?.message || "تعذر تشغيل المزامنة الذكية.");
-    } finally {
-      setMigrating(false);
     }
   };
 
@@ -3743,49 +3891,65 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
         <h2 style={{ margin: 0, color: T.accent, fontSize: "18px", fontWeight: "800" }}>🛡️ إدارة المحررين</h2>
       </div>
       <div style={{ padding: "16px" }}>
-        {editors.map((e, i) => (
-          <div key={i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "14px", padding: "12px 14px", marginBottom: "8px" }}>
-            {editIdx === i ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <input value={editForm.username} onChange={ev => setEditForm(f => ({ ...f, username: ev.target.value }))} placeholder="اسم المستخدم" style={inp} />
-                <input value={editForm.email || ""} onChange={ev => setEditForm(f => ({ ...f, email: ev.target.value }))} placeholder="البريد الإلكتروني (اختياري)" style={inp} />
-                <input value={editForm.password} onChange={ev => setEditForm(f => ({ ...f, password: ev.target.value }))} placeholder="كلمة السر" style={inp} />
-                <select value={editForm.role} onChange={ev => setEditForm(f => ({ ...f, role: ev.target.value }))} style={inp}>
-                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-                {editForm.role === "custom" && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", background: T.sectionBg, borderRadius: "10px", padding: "10px" }}>
-                    {PERMISSION_OPTIONS.map(opt => (
-                      <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: T.text, background: editForm.permissions.includes(opt.id) ? `${T.accent}22` : "transparent", border: `1px solid ${editForm.permissions.includes(opt.id) ? T.accent : T.cardBorder}`, borderRadius: "8px", padding: "5px 8px", cursor: "pointer" }}>
-                        <input type="checkbox" checked={editForm.permissions.includes(opt.id)} onChange={() => setEditForm(f => ({ ...f, permissions: togglePermission(f.permissions, opt.id) }))} style={{ accentColor: T.accent }} />
-                        {opt.label}
-                      </label>
-                    ))}
+        {loadingEditors ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "24px 0", color: T.text }}>
+            <div style={{ width: "24px", height: "24px", borderRadius: "50%", border: `3px solid ${T.cardBorder}`, borderTopColor: T.accent, animation: "spin 0.8s linear infinite" }} />
+          </div>
+        ) : editors.length === 0 ? (
+          <div style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "14px", padding: "20px", textAlign: "center", color: T.subtext }}>
+            لا توجد محررين مسجلين حالياً.
+          </div>
+        ) : (
+          <>
+            {fetchError ? (
+              <div style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "14px", padding: "16px", color: T.danger, marginBottom: "12px", wordBreak: "break-word" }}>
+                {fetchError}
+              </div>
+            ) : null}
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {editors.map((e, i) => (
+              <div key={e.id || i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "14px", padding: "12px 14px" }}>
+                {editIdx === i ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <input value={editForm.username} onChange={ev => setEditForm(f => ({ ...f, username: ev.target.value }))} placeholder="اسم المستخدم" style={inp} />
+                    <input value={editForm.email || ""} onChange={ev => setEditForm(f => ({ ...f, email: ev.target.value }))} placeholder="البريد الإلكتروني (اختياري)" style={inp} />
+                    <input value={editForm.password} onChange={ev => setEditForm(f => ({ ...f, password: ev.target.value }))} placeholder="كلمة السر" style={inp} />
+                    <select value={editForm.role} onChange={ev => setEditForm(f => ({ ...f, role: ev.target.value }))} style={inp}>
+                      {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
+                    {editForm.role === "custom" && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", background: T.sectionBg, borderRadius: "10px", padding: "10px" }}>
+                        {PERMISSION_OPTIONS.map(opt => (
+                          <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: T.text, background: editForm.permissions.includes(opt.id) ? `${T.accent}22` : "transparent", border: `1px solid ${editForm.permissions.includes(opt.id) ? T.accent : T.cardBorder}`, borderRadius: "8px", padding: "5px 8px", cursor: "pointer" }}>
+                            <input type="checkbox" checked={editForm.permissions.includes(opt.id)} onChange={() => setEditForm(f => ({ ...f, permissions: togglePermission(f.permissions, opt.id) }))} style={{ accentColor: T.accent }} />
+                            {opt.label}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {err && <p style={{ color: T.danger, fontSize: "12px", margin: 0 }}>{err}</p>}
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button onClick={(event) => saveEdit(event)} disabled={isSubmitting} style={{ flex: 1, background: isSubmitting ? "#6b7280" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px", cursor: isSubmitting ? "not-allowed" : "pointer", fontWeight: "700", fontFamily: "'Cairo',sans-serif" }}>{isSubmitting ? "⏳ جاري الحفظ..." : "✅ حفظ"}</button>
+                      <button onClick={() => { setEditIdx(null); setEditForm(null); setErr(""); }} style={{ flex: 1, background: "transparent", border: `1px solid ${T.cardBorder}`, color: T.subtext, borderRadius: "10px", padding: "10px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>إلغاء</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-start" }}>
+                    <div style={{ flex: "1 1 220px", minWidth: "180px", wordBreak: "break-word", overflowWrap: "anywhere" }}>
+                      <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "14px" }}>{e.username}</p>
+                                      <p style={{ margin: "2px 0 0", fontSize: "12px", color: T.subtext, wordBreak: "break-word", overflowWrap: "anywhere" }}>{getRoleDescription(e.role)} · البريد: {e.email || "—"} · كلمة السر: {e.password || "—"}</p>
+                    </div>
+                    <button onClick={() => startEdit(i)} style={{ flex: "1 1 120px", minWidth: "120px", background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "8px 10px", cursor: "pointer", fontSize: "14px" }}>✏️ تعديل</button>
+                    <button onClick={() => removeEditor(i)} style={{ flex: "1 1 120px", minWidth: "120px", background: "#e5533318", color: "#e55333", border: "1px solid #e5533340", borderRadius: "8px", padding: "8px 10px", cursor: "pointer", fontSize: "14px", fontFamily: "'Cairo',sans-serif" }}>🗑️ حذف</button>
                   </div>
                 )}
-                {err && <p style={{ color: T.danger, fontSize: "12px", margin: 0 }}>{err}</p>}
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <button onClick={(event) => saveEdit(event)} disabled={isSubmitting} style={{ flex: 1, background: isSubmitting ? "#6b7280" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px", cursor: isSubmitting ? "not-allowed" : "pointer", fontWeight: "700", fontFamily: "'Cairo',sans-serif" }}>{isSubmitting ? "⏳ جاري الحفظ..." : "✅ حفظ"}</button>
-                  <button onClick={() => { setEditIdx(null); setEditForm(null); setErr(""); }} style={{ flex: 1, background: "transparent", border: `1px solid ${T.cardBorder}`, color: T.subtext, borderRadius: "10px", padding: "10px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>إلغاء</button>
-                </div>
               </div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <div style={{ flex: 1 }}>
-                  <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "14px" }}>{e.username}</p>
-                  <p style={{ margin: "2px 0 0", fontSize: "12px", color: T.subtext }}>{roleLabel(e)} · كلمة السر: {e.password}{e.email ? ` · البريد: ${e.email}` : ""}</p>
-                </div>
-                <button onClick={() => startEdit(i)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px" }}>✏️</button>
-                <button onClick={() => removeEditor(i)} style={{ background: "#e5533318", color: "#e55333", border: "1px solid #e5533340", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", fontFamily: "'Cairo',sans-serif" }}>🗑️ حذف</button>
-              </div>
-            )}
+            ))}
           </div>
-        ))}
+        </>
+        )}
         <h3 style={{ color: T.text, margin: "16px 0 10px", fontSize: "15px" }}>➕ إضافة محرر جديد</h3>
         <div style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", display: "flex", flexDirection: "column", gap: "10px" }}>
-          <button onClick={runLegacyMigration} disabled={migrating} style={{ background: migrating ? "#6b7280" : `linear-gradient(135deg,#16a34a,#15803d)`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontSize: "14px", fontWeight: "700", cursor: migrating ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
-            {migrating ? "جاري التفعيل والترحيل..." : "تفعيل وترحيل الحسابات إلى Firebase Auth"}
-          </button>
           <input value={form.username} onChange={e => { setForm(f => ({ ...f, username: e.target.value })); setErr(""); }} placeholder="اسم المستخدم للمحرر" style={inp} />
           <input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="البريد الإلكتروني (اختياري)" style={inp} />
           <input value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="كلمة السر" style={inp} />
@@ -4150,8 +4314,9 @@ function AdminNews({ config, saveConfig, T, onBack }) {
   useEffect(() => { 
     fbGet("news").then(d => { 
       if (d) setNews(d.sort((a, b) => b.createdAt - a.createdAt)); 
-    }); 
-  }, []); 
+    });
+    return () => unsubscribe && unsubscribe();
+  }, [role, localAuthLoading, localCurrentUser]);
 
   // دالة النشر المحدثة لحل مشكلة تعليق السيرفر الوهمي "فش نت"
   const addNews = async () => { 
