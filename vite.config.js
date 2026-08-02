@@ -12,6 +12,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3,pdf}'], 
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 
+        navigateFallbackDenylist: [/^\/pdf\.worker\.min\.js$/],
       },
       manifest: {
         name: 'سواعد الخير التعليمية',
