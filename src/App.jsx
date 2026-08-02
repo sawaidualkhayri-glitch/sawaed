@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
 import { collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
-import { pdfjs } from "react-pdf";
 import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
 const MASTER_ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
@@ -9,11 +8,6 @@ import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMal
 import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded } from "./firebaseAuth";
 import { db, getEditorProvisioningAuth, firebaseConfig, auth } from "./firebase";
 import { cloudflareWorkerBaseUrl } from "./config";
-
-// Use a locally served pdf.worker to guarantee offline rendering in the PWA.
-// Place a copy of the pdf.worker script at `public/pdf.worker.min.js` (from pdfjs-dist)
-// so the worker can be loaded even when the app is offline.
-pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 // Simple ErrorBoundary to catch rendering errors from react-pdf or other subtrees
 class ErrorBoundary extends React.Component {
@@ -2071,7 +2065,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
 
     loadFolderData();
     return () => { cancelled = true; };
-  }, [storageKey, config]);
+  }, [storageKey]);
 
   useEffect(() => {
     let items = [...folderData];

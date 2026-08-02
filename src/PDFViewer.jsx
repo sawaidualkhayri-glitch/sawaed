@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-const workerUrl = new URL('/pdf.worker.min.js', import.meta.url).toString();
+const workerUrl = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export default function PDFViewer({ fileUrl, title }) {
@@ -36,11 +36,13 @@ export default function PDFViewer({ fileUrl, title }) {
     setError(true);
   }
 
+  const documentFile = typeof fileUrl === "string" && fileUrl.trim() ? fileUrl : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "100%", minHeight: "100%" }}>
       <div style={{ width: "100%", maxWidth: 960, minHeight: 320, background: "#111", borderRadius: 16, padding: 16, boxSizing: "border-box" }}>
         <Document
-          file={fileUrl}
+          file={documentFile}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
           loading={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Loading PDF...</div>}
