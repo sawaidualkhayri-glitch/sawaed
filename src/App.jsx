@@ -1720,6 +1720,19 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
   };
 
   const viewUrl = localUrl || getOnlineViewUrl(url);
+  const imageExtensionRegex = /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/i;
+  const isImageUrl = (value) => typeof value === "string" && imageExtensionRegex.test(value);
+  const isPdf = isPdfMimeType(mimeType) || (typeof title === "string" && title.toLowerCase().endsWith(".pdf"));
+  const isImageContent = !isPdf && (
+    isImageMimeType(mimeType) ||
+    (typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/")) ||
+    isImageUrl(url) ||
+    isImageUrl(title) ||
+    (savedBlob?.type && savedBlob.type.toLowerCase().startsWith("image/")) ||
+    Boolean(localUrl) ||
+    isSavedOffline
+  );
+  const imageSrc = localUrl || viewUrl;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 99999, display: "flex", flexDirection: "column" }}>
@@ -1787,13 +1800,13 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
               />
             </ErrorBoundary>
           </div>
-        ) : isImageMimeType(mimeType) ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111' }}>
-            <img src={localUrl || pdfSource(url)} alt={title} style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 120px)', objectFit: 'contain' }} />
+        ) : isImageContent ? (
+          <div style={{ flex: "1 1 0%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", width: "100%", height: "100%", minHeight: "0px", minWidth: "0px", overflow: "hidden" }}>
+            <img alt={title || "صورة"} src={imageSrc} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }} />
           </div>
         ) : (
-          <div style={{ flex: 1, position: 'relative' }}>
-            <iframe src={viewUrl} title={title || "file-viewer"} style={{ flex: 1, width: "100%", height: '100%', border: "none", background: "#fff" }} sandbox="allow-scripts allow-same-origin allow-popups allow-forms" />
+          <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', background: '#111', minHeight: 0, minWidth: 0 }}>
+            <iframe src={viewUrl} title={title || "file-viewer"} style={{ flex: 1, width: "100%", height: '100%', border: "none", background: "#111" }} sandbox="allow-scripts allow-same-origin allow-popups allow-forms" />
             <div style={{ position: 'absolute', right: 12, top: 12 }}>
               <button onClick={() => window.open(getDownloadUrl(url), '_blank')} style={{ background: T.accent, color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 6 }}>فتح في تبويب جديد</button>
             </div>
