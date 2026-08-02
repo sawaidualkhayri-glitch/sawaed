@@ -4788,6 +4788,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [showAddFolderModal, setShowAddFolderModal] = useState(false);
   const [showAddFileModal, setShowAddFileModal] = useState(false);
+  const [targetFolderId, setTargetFolderId] = useState(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFileTitle, setNewFileTitle] = useState("");
   const [newFileUrl, setNewFileUrl] = useState("");
@@ -4846,6 +4847,58 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const [folderData, setFolderData] = useState([]);
 
+  const createItemId = (prefix = "item") => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const normalizeItemTree = (items) => {
+    if (!Array.isArray(items)) return [];
+    return items.map(item => {
+      if (!item || typeof item !== "object") return item;
+      if (item.type === "folder") {
+        return {
+          ...item,
+          id: item.id || createItemId("folder"),
+          children: normalizeItemTree(item.children || []),
+        };
+      }
+      return {
+        ...item,
+        id: item.id || createItemId("file"),
+      };
+    });
+  };
+
+  const countNestedItems = (item) => {
+    if (!item || item.type !== "folder") return 0;
+    return (item.children || []).reduce((sum, child) => {
+      if (!child) return sum;
+      if (child.type === "folder") return sum + 1 + countNestedItems(child);
+      return sum + 1;
+    }, 0);
+  };
+
+  const insertItemIntoTree = (items, parentId, newItem) => {
+    return items.map(item => {
+      if (!item || typeof item !== "object") return item;
+      if (item.type === "folder" && item.id === parentId) {
+        return { ...item, children: [...(item.children || []), newItem] };
+      }
+      if (item.type === "folder") {
+        return { ...item, children: insertItemIntoTree(item.children || [], parentId, newItem) };
+      }
+      return item;
+    });
+  };
+
+  const removeItemFromTree = (items, itemId) => {
+    return items.filter(item => item?.id !== itemId).map(item => {
+      if (!item || typeof item !== "object") return item;
+      if (item.type === "folder") {
+        return { ...item, children: removeItemFromTree(item.children || [], itemId) };
+      }
+      return item;
+    });
+  };
+
   useEffect(() => {
     if (!storageKey) {
       setFolderData([]);
@@ -4854,7 +4907,8 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     const raw = config[storageKey];
     if (raw) {
       try {
-        setFolderData(typeof raw === "string" ? JSON.parse(raw) : raw);
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        setFolderData(normalizeItemTree(parsed));
       } catch {
         setFolderData([]);
       }
@@ -4865,9 +4919,10 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const saveFolderData = async (newData) => {
     if (!storageKey) return;
-    const newConfig = { ...config, [storageKey]: JSON.stringify(newData) };
+    const normalized = normalizeItemTree(newData);
+    const newConfig = { ...config, [storageKey]: JSON.stringify(normalized) };
     await saveConfig(newConfig);
-    setFolderData(newData);
+    setFolderData(normalized);
   };
 
   const inp = {
@@ -4888,26 +4943,86 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const addFolder = async () => {
     if (!newFolderName.trim()) return;
-    const newData = [...folderData, { type: "folder", name: newFolderName.trim(), children: [] }];
+    const newData = [...folderData, { id: createItemId("folder"), type: "folder", name: newFolderName.trim(), children: [] }];
     await saveFolderData(newData);
     setNewFolderName("");
     setShowAddFolderModal(false);
   };
 
-  const addFile = async () => {
-    if (!newFileTitle.trim() || !newFileUrl.trim()) return;
-    const newData = [...folderData, { title: newFileTitle.trim(), url: newFileUrl.trim(), type: newFileType, description: "" }];
-    await saveFolderData(newData);
+  const resetFileModal = () => {
+    setShowAddFileModal(false);
+    setTargetFolderId(null);
     setNewFileTitle("");
     setNewFileUrl("");
     setNewFileType("link");
-    setShowAddFileModal(false);
   };
 
-  const deleteItem = (index) => {
-    const newData = folderData.filter((_, i) => i !== index);
+  const addFile = async () => {
+    if (!newFileTitle.trim() || !newFileUrl.trim()) return;
+    const newItem = {
+      id: createItemId("file"),
+      title: newFileTitle.trim(),
+      url: newFileUrl.trim(),
+      type: newFileType,
+      description: "",
+      parentId: targetFolderId || null,
+    };
+
+    const newData = targetFolderId
+      ? insertItemIntoTree(folderData, targetFolderId, newItem)
+      : [...folderData, newItem];
+
+    await saveFolderData(newData);
+    resetFileModal();
+  };
+
+  const deleteItem = (itemId) => {
+    const newData = removeItemFromTree(folderData, itemId);
     saveFolderData(newData);
   };
+
+  const renderItems = (items, depth = 0) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      {items.map(item => {
+        if (!item || typeof item !== "object") return null;
+        if (item.type === "folder") {
+          const nestedCount = countNestedItems(item);
+          return (
+            <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                <div style={{ flex: 1 }}>
+                  <div>📁 {item.name} ({nestedCount} عنصر)</div>
+                  {item.children?.length > 0 && (
+                    <div style={{ color: T.subtext, fontSize: "12px", marginTop: "4px" }}>
+                      يحتوي على {item.children.length} عنصر فرعي
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button onClick={() => { setTargetFolderId(item.id); setShowAddFileModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                    + إضافة ملف
+                  </button>
+                  <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️ حذف</button>
+                </div>
+              </div>
+              {item.children?.length > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  {renderItems(item.children, depth + 1)}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        return (
+          <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>📄 {item.title}</div>
+            <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️ حذف</button>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <AdminSection title="إدارة المجلدات" icon="📁" T={T} onBack={onBack} onSave={() => {}}>
@@ -4979,20 +5094,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             {folderData.length === 0 ? (
               <p style={{ color: T.subtext, textAlign: "center", padding: "40px 0" }}>لا توجد مجلدات بعد. أضف مجلدًا أو ملفًا.</p>
             ) : (
-              <div>
-                {folderData.map((item, idx) => (
-                  <div key={idx} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      {item.type === "folder" ? (
-                        <div>📁 {item.name} ({item.children?.length || 0} عنصر)</div>
-                      ) : (
-                        <div>📄 {item.title}</div>
-                      )}
-                    </div>
-                    <button onClick={() => deleteItem(idx)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️ حذف</button>
-                  </div>
-                ))}
-              </div>
+              <div>{renderItems(folderData)}</div>
             )}
           </div>
 
@@ -5005,9 +5107,9 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
           </Modal>
 
-          <Modal open={showAddFileModal} title="إضافة ملف جديد" onClose={() => { setShowAddFileModal(false); setNewFileTitle(""); setNewFileUrl(""); setNewFileType("link"); }} footer={(
+          <Modal open={showAddFileModal} title="إضافة ملف جديد" onClose={resetFileModal} footer={(
             <>
-              <button onClick={() => { setShowAddFileModal(false); setNewFileTitle(""); setNewFileUrl(""); setNewFileType("link"); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+              <button onClick={resetFileModal} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
               <button onClick={addFile} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
             </>
           )}>
