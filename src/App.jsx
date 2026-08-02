@@ -470,7 +470,13 @@ function toFirestoreValue(v) {
 // ============================================================
 
 function ls(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null || v === undefined) return fallback;
+    return JSON.parse(v);
+  } catch {
+    return fallback;
+  }
 }
 
 function lsSet(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
@@ -645,7 +651,10 @@ const SEC_EMOJI = { "الرزم": "📦", "الكتب": "📚", "حلول الك
 
 export default function App() {
   const [config, setConfig] = useState(() => ls("sawaed_config", DEFAULT_CONFIG));
-  const [darkMode, setDarkMode] = useState(() => ls("sawaed_dark", true));
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = ls("sawaed_dark", null);
+    return saved === null ? true : saved;
+  });
   const [page, setPage] = useState("loading");
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
