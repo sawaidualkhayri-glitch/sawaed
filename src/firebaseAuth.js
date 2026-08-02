@@ -8,7 +8,7 @@ import {
   sendEmailVerification
 } from "firebase/auth";
 import { auth, db, getEditorProvisioningAuth } from "./firebase";
-import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, query, where, documentId } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, query, where, documentId, limit } from "firebase/firestore";
 
 const ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
 const ADMIN_EMAIL = "nadahindi301@gmail.com";
@@ -162,6 +162,35 @@ async function resolveUsernameToEmail(identifier) {
   }
 }
 
+async function lookupIdentifierInFirestore(identifier) {
+  const trimmedIdentifier = (identifier || "").trim();
+  if (!trimmedIdentifier) return null;
+
+  if (trimmedIdentifier.includes("@")) {
+    const normalizedEmail = trimmedIdentifier.toLowerCase();
+    const usernameQuery = query(collection(db, "usernames"), where("email", "==", normalizedEmail), limit(1));
+    const usernameSnapshot = await getDocs(usernameQuery);
+    if (!usernameSnapshot.empty) {
+      return { type: "username", data: usernameSnapshot.docs[0].data() };
+    }
+
+    const usersQuery = query(collection(db, "users"), where("email", "==", normalizedEmail), limit(1));
+    const usersSnapshot = await getDocs(usersQuery);
+    if (!usersSnapshot.empty) {
+      return { type: "users", data: usersSnapshot.docs[0].data() };
+    }
+
+    return null;
+  }
+
+  const usernameDocRef = doc(db, "usernames", trimmedIdentifier.toLowerCase());
+  const usernameDoc = await getDoc(usernameDocRef);
+  if (!usernameDoc.exists()) {
+    return null;
+  }
+  return { type: "username", data: usernameDoc.data() };
+}
+
 export const loginWithIdentifier = async (identifier, password) => {
   const trimmedIdentifier = (identifier || "").trim();
   if (!trimmedIdentifier || !password) {
@@ -170,55 +199,34 @@ export const loginWithIdentifier = async (identifier, password) => {
     throw err;
   }
 
-  if (trimmedIdentifier.includes("@")) {
-    const signedInUser = await loginWithEmail(trimmedIdentifier.toLowerCase(), password);
-    await ensureUserProfile(signedInUser, trimmedIdentifier, "user", { email: signedInUser.email || trimmedIdentifier });
-    return signedInUser;
+  const lookupResult = await lookupIdentifierInFirestore(trimmedIdentifier);
+  if (!lookupResult) {
+    const err = new Error("اسم المستخدم أو البريد الإلكتروني غير موجود");
+    err.code = "auth/username-not-found";
+    throw err;
   }
 
-  const resolvedEmail = await resolveUsernameToEmail(trimmedIdentifier);
-  if (!resolvedEmail) {
-    // try legacy local pattern as fallback
-    const fallbackEmail = `${trimmedIdentifier.toLowerCase()}@sawaed.local`;
-    try {
-      const signedInUserFallback = await loginWithEmail(fallbackEmail, password);
-      const profileFallback = await ensureUserProfile(signedInUserFallback, trimmedIdentifier, "user", { email: fallbackEmail, username: trimmedIdentifier });
-      if (typeof window !== "undefined") {
-        const payload = {
-          uid: signedInUserFallback?.uid,
-          username: profileFallback?.username || trimmedIdentifier,
-          role: profileFallback?.role || "user",
-          email: fallbackEmail,
-          fullName: profileFallback?.fullName || trimmedIdentifier,
-          displayName: profileFallback?.displayName || trimmedIdentifier,
-          isCustomAccount: Boolean(profileFallback?.isCustomAccount),
-        };
-        window.dispatchEvent(new CustomEvent("sawaed-auth-profile", { detail: { profile: payload, firebaseUser: { uid: payload.uid, email: payload.email, displayName: payload.displayName || payload.fullName || trimmedIdentifier } } }));
-      }
-      return signedInUserFallback;
-    } catch (e) {
-      const err = new Error("Username not found");
-      err.code = "auth/username-not-found";
-      throw err;
-    }
-  }
+  const actualEmail = lookupResult.type === "username"
+    ? (lookupResult.data?.email || `${trimmedIdentifier.toLowerCase()}@sawaed.local`).toString().trim().toLowerCase()
+    : trimmedIdentifier.toLowerCase();
 
-  let signedInUser = null;
+  let signedInUser;
   try {
-    signedInUser = await loginWithEmail(resolvedEmail, password);
+    signedInUser = await loginWithEmail(actualEmail, password);
   } catch (signInErr) {
-    // fallback to local-pattern email if initial resolved email fails
-    const fallbackEmail = `${trimmedIdentifier.toLowerCase()}@sawaed.local`;
-    signedInUser = await loginWithEmail(fallbackEmail, password);
+    const err = new Error("اسم المستخدم أو كلمة السر غير صحيحة");
+    err.code = "auth/wrong-password";
+    throw err;
   }
-  const profile = await ensureUserProfile(signedInUser, trimmedIdentifier, "user", { email: signedInUser.email || resolvedEmail || `${trimmedIdentifier.toLowerCase()}@sawaed.local`, username: trimmedIdentifier });
+
+  const profile = await ensureUserProfile(signedInUser, trimmedIdentifier, "user", { email: signedInUser.email || actualEmail, username: trimmedIdentifier });
 
   if (typeof window !== "undefined") {
     const payload = {
       uid: signedInUser?.uid,
       username: profile?.username || trimmedIdentifier,
       role: profile?.role || "user",
-      email: resolvedEmail,
+      email: signedInUser.email || actualEmail,
       fullName: profile?.fullName || trimmedIdentifier,
       displayName: profile?.displayName || trimmedIdentifier,
       isCustomAccount: Boolean(profile?.isCustomAccount),

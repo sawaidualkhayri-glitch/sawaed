@@ -645,7 +645,7 @@ const SEC_EMOJI = { "الرزم": "📦", "الكتب": "📚", "حلول الك
 
 export default function App() {
   const [config, setConfig] = useState(() => ls("sawaed_config", DEFAULT_CONFIG));
-  const [darkMode, setDarkMode] = useState(() => ls("sawaed_dark", false));
+  const [darkMode, setDarkMode] = useState(() => ls("sawaed_dark", true));
   const [page, setPage] = useState("loading");
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
@@ -672,6 +672,11 @@ export default function App() {
       const el = document.documentElement;
       el.classList.remove("light", "dark");
       el.classList.add(darkMode ? "dark" : "light");
+      if (!el.classList.contains("dark") && !el.classList.contains("light")) {
+        el.classList.add("dark");
+      }
+      document.body.classList.remove("light", "dark");
+      document.body.classList.add(darkMode ? "dark" : "light");
     } catch (e) {
       // ignore (e.g., during SSR or non-browser env)
     }
@@ -1181,8 +1186,13 @@ function RegisterPage({ config, T, darkMode }) {
             <button onClick={() => setMode("register")} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
               ✍️ إنشاء حساب جديد
             </button>
-            <button onClick={authWithGoogle} disabled={loading} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,#4285F4,#34A853)`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
-              {loading ? "⏳ جاري..." : "🌐 تسجيل الدخول بـ Google"}
+            <button onClick={authWithGoogle} disabled={loading} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,#4285F4,#34A853)`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              {loading ? "⏳ جاري..." : (
+                <>
+                  تسجيل الدخول بـ Google
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1em" height="1em" fill="currentColor" style={{ verticalAlign: "middle", marginInlineStart: "6px" }}><path d="M500 261.8C500 403.3 403.1 504 260 504 122.8 504 12 393.2 12 256S122.8 8 260 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9c-88.3-85.2-252.5-21.2-252.5 118.2 0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9l-140.8 0 0-85.3 236.1 0c2.3 12.7 3.9 24.9 3.9 41.4z"/></svg>
+                </>
+              )}
             </button>
           </div>
         )}
