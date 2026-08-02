@@ -95,7 +95,10 @@ export const checkIsFileCached = async (itemId) => {
 
 export const saveFileForOffline = (itemId) => {
   return new Promise((resolve, reject) => {
-    if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
+    if (!("serviceWorker" in navigator)) {
+      return reject(new Error("الـ Service Worker غير مدعوم في المتصفح الحالي"));
+    }
+    if (!navigator.serviceWorker.controller) {
       return reject(new Error("الـ Service Worker غير نشط حالياً"));
     }
 

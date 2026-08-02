@@ -385,39 +385,65 @@ const FB_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.p
 async function fbGet(collection, docId) {
   try {
     const url = docId ? `${FB_BASE}/${collection}/${docId}` : `${FB_BASE}/${collection}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
+    const headers = await getFirestoreAuthHeaders();
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("fbGet failed", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      return null;
+    }
     const data = await res.json();
     if (docId) return parseFirestoreDoc(data);
     return (data.documents || []).map(d => ({ id: d.name.split("/").pop(), ...parseFirestoreDoc(d) }));
-  } catch { return null; }
+  } catch (err) {
+    console.error("fbGet exception", { collection, docId, error: err });
+    return null;
+  }
 }
 
 async function fbSet(collection, docId, fields) {
   try {
     const body = { fields: toFirestoreFields(fields) };
     const url = `${FB_BASE}/${collection}/${docId}`;
+    const headers = { "Content-Type": "application/json", ...(await getFirestoreAuthHeaders()) };
     const res = await fetch(url, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
-    return res.ok;
-  } catch { return false; }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("fbSet failed", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("fbSet exception", { collection, docId, error: err });
+    return false;
+  }
 }
 
 async function fbAdd(collection, fields) {
   try {
     const body = { fields: toFirestoreFields(fields) };
-    const res = await fetch(`${FB_BASE}/${collection}`, {
+    const url = `${FB_BASE}/${collection}`;
+    const headers = { "Content-Type": "application/json", ...(await getFirestoreAuthHeaders()) };
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("fbAdd failed", { collection, status: res.status, statusText: res.statusText, body: text });
+      return null;
+    }
     const data = await res.json();
     return data.name.split("/").pop();
-  } catch { return null; }
+  } catch (err) {
+    console.error("fbAdd exception", { collection, error: err });
+    return null;
+  }
 }
 
 async function fbDelete(collection, docId) {
@@ -463,6 +489,28 @@ function toFirestoreValue(v) {
   if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
   if (typeof v === "object") return { mapValue: { fields: toFirestoreFields(v) } };
   return { stringValue: String(v) };
+}
+
+async function getFirestoreAuthHeaders() {
+  try {
+    const token = auth?.currentUser ? await auth.currentUser.getIdToken() : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch (err) {
+    console.warn("Failed to obtain Firestore auth token:", err);
+    return {};
+  }
+}
+
+function normalizeKeyPart(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").replace(/_+/g, "_");
+}
+
+function normalizeFolderKey({ grade, branch, semester, subject, section }) {
+  return `folder_${normalizeKeyPart(grade)}_${normalizeKeyPart(branch)}_${normalizeKeyPart(semester)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`;
+}
+
+function normalizeFoundKey({ subject, branch, type, sub }) {
+  return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(branch || "عام")}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
 }
 
 // ============================================================
@@ -1933,7 +1981,7 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
 
 function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, data, onBack, isEditorSession, editorRole, editorPermissions }) {
   const { subject, grade, branch, semester, section, folderPath = [] } = data;
-  const storageKey = `folder_${grade}_${branch}_${semester}_${subject}_${section}`;
+  const storageKey = normalizeFolderKey({ grade, branch, semester, subject, section });
 
   const [folderData, setFolderData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2465,7 +2513,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
     idbGetAllFiles().then(files => setSavedIds(new Set(files.map(f => f.id))));
   }, []);
 
-  const foundKey = selSub ? `found_${subject}_${selBranch || "عام"}_${selType}_${selSub}` : null;
+  const foundKey = selSub ? normalizeFoundKey({ subject, branch: selBranch || "عام", type: selType, sub: selSub }) : null;
   const raw = foundKey ? config[foundKey] : null;
 
   const items = (() => {
@@ -4177,7 +4225,7 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   const [driveLink, setDriveLink] = useState("");
   const fileRef = useRef();
 
-  const foundKey = `found_${selSub}_${selBranch}_${selType}_${selArea}`;
+  const foundKey = normalizeFoundKey({ subject: selSub, branch: selBranch, type: selType, sub: selArea });
   const [items, setItems] = useState([]);
 
   useEffect(() => { const raw = config[foundKey]; setItems(raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []); }, [foundKey]);
@@ -4706,9 +4754,10 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   };
 
   const subjectKey = getSubjectKey();
+  const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
 
   const storageKey = (selectedSubject && selectedSection) 
-    ? `folder_${subjectKey}_${selectedSubject}_${selectedSection}` 
+    ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) 
     : "";
 
   const getAvailableSubjects = () => {
