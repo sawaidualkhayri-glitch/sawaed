@@ -513,6 +513,19 @@ function normalizeFoundKey({ subject, branch, type, sub }) {
   return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(branch || "عام")}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
 }
 
+function parseStoredItems(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 // ============================================================
 // LOCAL STORAGE HELPERS
 // ============================================================
@@ -1729,6 +1742,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
     isImageUrl(url) ||
     isImageUrl(title) ||
     (savedBlob?.type && savedBlob.type.toLowerCase().startsWith("image/")) ||
+    (typeof localUrl === "string" && localUrl.startsWith("blob:")) ||
     Boolean(localUrl) ||
     isSavedOffline
   );
@@ -1801,8 +1815,8 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
             </ErrorBoundary>
           </div>
         ) : isImageContent ? (
-          <div style={{ flex: "1 1 0%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", width: "100%", height: "100%", minHeight: "0px", minWidth: "0px", overflow: "hidden" }}>
-            <img alt={title || "صورة"} src={imageSrc} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", display: "block" }} />
+          <div style={{ flex: "1 1 0%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", width: "100%", height: "100%", minHeight: "0px", minWidth: "0px", overflow: "auto", padding: "16px", boxSizing: "border-box" }}>
+            <img alt={title || "صورة"} src={imageSrc} style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", display: "block", borderRadius: "12px" }} />
           </div>
         ) : (
           <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', background: '#111', minHeight: 0, minWidth: 0 }}>
@@ -2024,17 +2038,40 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   }, []);
 
   useEffect(() => {
-    const raw = config[storageKey];
-    if (raw) {
+    let cancelled = false;
+
+    const loadFolderData = async () => {
+      setLoading(true);
       try {
-        const parsed = typeof raw === "string" ? JSON.parse(raw) : (Array.isArray(raw) ? raw : []);
-        setFolderData(parsed);
-      } catch { setFolderData([]); }
-    } else {
-      setFolderData([]);
-    }
-    setLoading(false);
-  }, [storageKey]);
+        const doc = await fbGet("folder_items", storageKey);
+        let parsedItems = [];
+
+        if (doc && Array.isArray(doc.items)) {
+          parsedItems = doc.items;
+        } else if (doc && doc.items !== undefined) {
+          parsedItems = parseStoredItems(doc.items);
+        } else {
+          const fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
+          parsedItems = fallbackRaw ? parseStoredItems(fallbackRaw) : parseStoredItems(config[storageKey]);
+        }
+
+        if (!cancelled) {
+          setFolderData(parsedItems);
+        }
+      } catch (err) {
+        console.warn("فشل تحميل بنية المجلدات من Firestore:", err);
+        if (!cancelled) {
+          const fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
+          setFolderData(fallbackRaw ? parseStoredItems(fallbackRaw) : []);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadFolderData();
+    return () => { cancelled = true; };
+  }, [storageKey, config]);
 
   useEffect(() => {
     let items = [...folderData];
@@ -2056,9 +2093,13 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem" || auth?.currentUser?.uid === MASTER_ADMIN_UID);
 
   const saveFolderData = async (newData) => {
-    const newConfig = { ...config, [storageKey]: JSON.stringify(newData) };
-    await saveConfig(newConfig);
     setFolderData(newData);
+    lsSet(`sawaed_folder_${storageKey}`, JSON.stringify(newData));
+    try {
+      await fbSet("folder_items", storageKey, { items: newData });
+    } catch (err) {
+      console.warn("فشل حفظ بنية المجلدات في Firestore:", err);
+    }
   };
 
   const saveCurrentItems = async (newItems) => {
