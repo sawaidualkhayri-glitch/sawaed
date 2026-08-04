@@ -1820,14 +1820,8 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
           حفظ للجهاز
         </button>
 
-        {isOnline && !loading && !error && (
-          isSavedOffline ? (
-            <button onClick={handleDeleteOffline} style={{ background: "#6e1a1a", color: "#fff", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "12px", cursor: "pointer" }}>حذف الأوفلاين</button>
-          ) : (
-            <button onClick={handleSaveOffline} disabled={isSaving} style={{ background: isSaving ? "#555" : "linear-gradient(135deg, #5B52D4, #8B82E8)", color: "#fff", border: "none", borderRadius: "8px", padding: "7px 14px", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}>
-              {isSaving ? "جاري التنزيل..." : "تحميل للوضع أوفلاين"}
-            </button>
-          )
+        {isOnline && !loading && !error && isSavedOffline && (
+          <button onClick={handleDeleteOffline} style={{ background: "#6e1a1a", color: "#fff", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "12px", cursor: "pointer" }}>حذف الأوفلاين</button>
         )}
       </div>
 

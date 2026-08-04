@@ -47,12 +47,17 @@ export default function PDFViewer({ fileUrl, title }) {
           loading={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Loading PDF...</div>}
           error={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Failed to load PDF. Check worker path.</div>}
         >
-          <Page
-            pageNumber={pageNumber}
-            width={width}
-            renderTextLayer={false}
-            renderAnnotationLayer={false}
-          />
+          <div style={{ display: "flex", justifyContent: "center", width: "100%", background: "#111" }}>
+            <div style={{ width: "100%", maxWidth: width, display: "flex", justifyContent: "center" }}>
+              <Page
+                pageNumber={pageNumber}
+                width={width}
+                renderTextLayer={false}
+                renderAnnotationLayer={false}
+                style={{ display: "block", margin: "0 auto", background: "#111" }}
+              />
+            </div>
+          </div>
         </Document>
       </div>
 
