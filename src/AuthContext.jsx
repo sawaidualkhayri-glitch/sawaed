@@ -44,14 +44,30 @@ export const canManageMalazem = (role) => ["super_admin", "admin", "editor_full"
 export const canManageTaasees = (role) => ["super_admin", "admin", "editor_full", "editor_taasees"].includes(normalizeUserRole(role));
 export const canManageNews = (role) => ["super_admin", "admin", "editor_full", "editor_news"].includes(normalizeUserRole(role));
 
+function canonicalizeGrade(grade) {
+  if (!grade || typeof grade !== "string") return grade || "";
+  const normalized = grade.trim().replace(/\s+/g, " ");
+  if (normalized === "ثاني عشر" || normalized === "ثاني عشر (توجيهي)" || normalized.includes("ثاني عشر")) {
+    return "ثاني عشر (توجيهي)";
+  }
+  return normalized;
+}
+
+function canonicalizeBranch(branch) {
+  if (!branch || typeof branch !== "string") return branch || "";
+  const normalized = branch.trim().replace(/\s+/g, " ");
+  if (normalized === "ادبي" || normalized === "أدبي") return "أدبي";
+  return normalized;
+}
+
 function buildUserProfile(firebaseUser, profile = {}) {
   const uid = firebaseUser.uid;
   const role = normalizeUserRole(profile.role || "user");
   const displayName = profile.displayName || profile.fullName || firebaseUser.displayName || "مستخدم";
   const fullName = profile.fullName || firebaseUser.displayName || "مستخدم";
-  const grade = profile.grade || "";
-  const branch = profile.branch || profile.stream || "";
-  const stream = profile.stream || profile.branch || "";
+  const grade = canonicalizeGrade(profile.grade || "");
+  const branch = canonicalizeBranch(profile.branch || profile.stream || "");
+  const stream = canonicalizeBranch(profile.stream || profile.branch || "");
   const hasProfileData = Boolean((grade || "").trim() && (stream || branch || "").trim());
   const profileCompleted = profile.profileCompleted === true || hasProfileData;
 

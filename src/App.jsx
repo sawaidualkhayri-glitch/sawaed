@@ -167,9 +167,9 @@ function driveProxyUrl(urlOrId) {
 
 function getDriveDirectUrl(url) {
   if (!url || typeof url !== "string") return url;
-  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (match && match[1]) {
-    return `https://lh3.googleusercontent.com/d/${match[1]}`;
+  const id = extractDriveId(url);
+  if (id) {
+    return `https://drive.google.com/uc?export=download&id=${id}&confirm=t`;
   }
   return url;
 }
@@ -228,7 +228,7 @@ function getOnlineViewUrl(inputUrl) {
 
 function getDownloadUrl(inputUrl) {
   if (!inputUrl) return "";
-  if (typeof isDriveUrl === "function" && isDriveUrl(inputUrl)) return driveDownloadUrl(inputUrl);
+  if (typeof isDriveUrl === "function" && isDriveUrl(inputUrl)) return getDriveDirectUrl(inputUrl);
   return inputUrl;
 }
 
@@ -448,10 +448,15 @@ async function fbDelete(collection, docId) {
 }
 
 function parseFirestoreDoc(doc) {
-  if (!doc.fields) return {};
+  if (!doc || !doc.fields) return {};
   const result = {};
   for (const [k, v] of Object.entries(doc.fields)) {
-    result[k] = parseFirestoreValue(v);
+    try {
+      result[k] = parseFirestoreValue(v);
+    } catch (err) {
+      console.error("Error parsing Firestore doc field:", k, err);
+      result[k] = null;
+    }
   }
   return result;
 }
@@ -499,25 +504,85 @@ function normalizeKeyPart(value) {
   return String(value || "").trim().replace(/\s+/g, " ").replace(/_+/g, "_");
 }
 
-function normalizeFolderKey({ grade, branch, semester, subject, section }) {
-  return `folder_${normalizeKeyPart(grade)}_${normalizeKeyPart(branch)}_${normalizeKeyPart(semester)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`;
+function canonicalizeGrade(grade) {
+  if (!grade || typeof grade !== "string") return grade || "";
+  const normalized = grade.trim().replace(/\s+/g, " ");
+  if (normalized === "ثاني عشر" || normalized === "ثاني عشر (توجيهي)" || normalized.includes("ثاني عشر")) {
+    return "ثاني عشر (توجيهي)";
+  }
+  return normalized;
 }
 
-function normalizeFoundKey({ subject, branch, type, sub }) {
-  return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(branch || "عام")}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
+function canonicalizeBranch(branch) {
+  if (!branch || typeof branch !== "string") return branch || "";
+  const normalized = branch.trim().replace(/\s+/g, " ");
+  if (normalized === "ادبي" || normalized === "أدبي") return "أدبي";
+  return normalized;
+}
+
+function canonicalizeSemester(grade, semester) {
+  const canonicalGrade = canonicalizeGrade(grade);
+  if (canonicalGrade.includes("حادي عشر")) {
+    return String(semester || "").trim() || "فصل أول";
+  }
+  return "فصل واحد";
+}
+
+function normalizeFolderKey({ grade = "", branch = "", semester = "", subject = "", section = "" } = {}) {
+  return `folder_${normalizeKeyPart(canonicalizeGrade(grade))}_${normalizeKeyPart(canonicalizeBranch(branch))}_${normalizeKeyPart(canonicalizeSemester(grade, semester))}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`;
+}
+
+function normalizeFoundKey({ subject = "", branch = "", type = "", sub = "" } = {}) {
+  return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(canonicalizeBranch(branch || "عام"))}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
+}
+
+function getFolderKeyVariants({ grade = "", branch = "", semester = "", subject = "", section = "" } = {}) {
+  const canonicalGrade = canonicalizeGrade(grade);
+  const canonicalBranch = canonicalizeBranch(branch);
+  const canonicalSemesterValue = canonicalizeSemester(grade, semester);
+  const variants = new Set();
+  variants.add(`folder_${normalizeKeyPart(canonicalGrade)}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(canonicalSemesterValue)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+  if (canonicalGrade === "ثاني عشر (توجيهي)") {
+    variants.add(`folder_${normalizeKeyPart("ثاني عشر")}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(canonicalSemesterValue)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+  }
+  if (canonicalSemesterValue === "فصل واحد") {
+    variants.add(`folder_${normalizeKeyPart(canonicalGrade)}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+    variants.add(`folder_${normalizeKeyPart("ثاني عشر")}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+  }
+  return Array.from(variants);
 }
 
 function parseStoredItems(value) {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+  try {
+    if (!value) return [];
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    console.error("Error parsing stored items:", e);
+    return [];
   }
-  return [];
+}
+
+function createItemId(prefix = "item") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeItemTree(items) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => {
+    if (!item || typeof item !== "object") return item;
+    if (item.type === "folder") {
+      return {
+        ...item,
+        id: item.id || createItemId("folder"),
+        children: normalizeItemTree(item.children || []),
+      };
+    }
+    return {
+      ...item,
+      id: item.id || createItemId("file"),
+    };
+  });
 }
 
 // ============================================================
@@ -1835,7 +1900,11 @@ function isImageMimeType(mime) {
 
 function pdfSource(url) {
   if (!url) return url;
-  return isDriveUrl(url) ? driveProxyUrl(url) || getDownloadUrl(url) : getDownloadUrl(url);
+  if (isDriveUrl(url)) {
+    const proxy = driveProxyUrl(url);
+    return proxy || getDriveDirectUrl(url) || url;
+  }
+  return getDownloadUrl(url);
 }
 
 // ============================================================
@@ -1844,7 +1913,9 @@ function pdfSource(url) {
 
 function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser, subject, onBack, isEditorSession, onOpenFolder }) {
   const { subject: sub, grade, branch } = subject;
-  const isGrade11 = grade.includes("حادي عشر");
+  const canonicalGrade = canonicalizeGrade(grade);
+  const canonicalBranch = canonicalizeBranch(branch);
+  const isGrade11 = canonicalGrade.includes("حادي عشر");
   const [selectedSemester, setSelectedSemester] = useState(null);
 
   useEffect(() => {
@@ -1865,9 +1936,9 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
 
   const getSubjectKey = () => {
     if (isGrade11 && selectedSemester) {
-      return `${grade}_${branch}_${selectedSemester}`;
+      return `${canonicalGrade}_${canonicalBranch}_${selectedSemester}`;
     } else if (!isGrade11) {
-      return `${grade}_${branch}`;
+      return `${canonicalGrade}_${canonicalBranch}`;
     }
     return null;
   };
@@ -1973,8 +2044,8 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
               if (onOpenFolder) {
                 onOpenFolder({
                   subject: sub,
-                  grade: grade,
-                  branch: branch,
+                  grade: canonicalGrade,
+                  branch: canonicalBranch,
                     semester: semesterKey,
                   section: sec,
                   folderPath: []
@@ -2037,25 +2108,64 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     const loadFolderData = async () => {
       setLoading(true);
       try {
-        const doc = await fbGet("folder_items", storageKey);
-        let parsedItems = [];
+        console.log("[STORAGE KEY - LOAD]", storageKey);
+        const variantKeys = getFolderKeyVariants({ grade, branch, semester, subject, section });
+        let doc = await fbGet("folder_items", storageKey);
+        if (!doc) {
+          for (const altKey of variantKeys.filter(key => key !== storageKey)) {
+            const altDoc = await fbGet("folder_items", altKey);
+            if (altDoc) {
+              doc = altDoc;
+              break;
+            }
+          }
+        }
 
+        let parsedItems = [];
         if (doc && Array.isArray(doc.items)) {
           parsedItems = doc.items;
         } else if (doc && doc.items !== undefined) {
           parsedItems = parseStoredItems(doc.items);
         } else {
-          const fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
-          parsedItems = fallbackRaw ? parseStoredItems(fallbackRaw) : parseStoredItems(config[storageKey]);
+          let fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
+          if (!fallbackRaw) {
+            for (const altKey of variantKeys.filter(key => key !== storageKey)) {
+              fallbackRaw = ls(`sawaed_folder_${altKey}`, null);
+              if (fallbackRaw) break;
+            }
+          }
+          if (!fallbackRaw) {
+            for (const altKey of variantKeys) {
+              if (config[altKey] !== undefined) {
+                fallbackRaw = config[altKey];
+                break;
+              }
+            }
+          }
+          parsedItems = fallbackRaw ? parseStoredItems(fallbackRaw) : [];
         }
 
+        const normalizedItems = normalizeItemTree(Array.isArray(parsedItems) ? parsedItems : []);
+        const shouldPersistNormalization = JSON.stringify(normalizedItems) !== JSON.stringify(parsedItems);
+
         if (!cancelled) {
-          setFolderData(parsedItems);
+          setFolderData(normalizedItems);
+        }
+
+        if (shouldPersistNormalization && !cancelled) {
+          await saveFolderData(normalizedItems);
         }
       } catch (err) {
         console.warn("فشل تحميل بنية المجلدات من Firestore:", err);
         if (!cancelled) {
-          const fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
+          let fallbackRaw = ls(`sawaed_folder_${storageKey}`, null);
+          if (!fallbackRaw) {
+            const variantKeys = getFolderKeyVariants({ grade, branch, semester, subject, section });
+            for (const altKey of variantKeys.filter(key => key !== storageKey)) {
+              fallbackRaw = ls(`sawaed_folder_${altKey}`, null);
+              if (fallbackRaw) break;
+            }
+          }
           setFolderData(fallbackRaw ? parseStoredItems(fallbackRaw) : []);
         }
       } finally {
@@ -2087,10 +2197,13 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem" || auth?.currentUser?.uid === MASTER_ADMIN_UID);
 
   const saveFolderData = async (newData) => {
-    setFolderData(newData);
-    lsSet(`sawaed_folder_${storageKey}`, JSON.stringify(newData));
+    const normalizedKey = storageKey;
+    console.log("[STORAGE KEY - SAVE]", normalizedKey);
+    const dataToSave = normalizeItemTree(Array.isArray(newData) ? newData : []);
+    setFolderData(dataToSave);
+    lsSet(`sawaed_folder_${normalizedKey}`, JSON.stringify(dataToSave));
     try {
-      await fbSet("folder_items", storageKey, { items: newData });
+      await fbSet("folder_items", normalizedKey, { items: dataToSave });
     } catch (err) {
       console.warn("فشل حفظ بنية المجلدات في Firestore:", err);
     }
@@ -2147,12 +2260,14 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       return;
     }
 
+    const normalizedUrl = driveLink.trim();
     const fileType = pendingUploadFile.type?.includes("pdf")
       ? "pdf"
       : pendingUploadFile.type?.includes("image")
         ? "image"
-        : "link";
-    const normalizedUrl = driveLink.trim();
+        : normalizedUrl.toLowerCase().includes(".pdf")
+          ? "pdf"
+          : "link";
     setForm((f) => ({
       ...f,
       title: f.title || pendingUploadFile?.name?.replace(/\.[^/.]+$/, "") || "مورد جديد",
@@ -2306,7 +2421,12 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const addResource = async () => {
     if (!form.title || !form.url) return;
     const normalizedUrl = form.url.trim();
-    const newItem = { ...form, url: normalizedUrl, title: form.title.trim() };
+    const newItem = {
+      id: createItemId("file"),
+      ...form,
+      url: normalizedUrl,
+      title: form.title.trim(),
+    };
     const newItems = [...currentItems, newItem];
     await saveCurrentItems(newItems);
     setForm({ title: "", url: "", description: "", type: "link" });
@@ -2383,15 +2503,11 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
           const saved = await idbGetFile(fileId);
           if (saved?.blob && saved.blob.size > 0) {
             const blobUrl = URL.createObjectURL(saved.blob);
-            setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: saved.type || getFileMimeType(item, saved.blob) });
-          } else {
-            await idbDeleteFile(fileId);
-            setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; });
-            await downloadInApp(item);
+            setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: saved.type || getFileMimeType(item, saved.blob), id: item.id });
+            return;
           }
-        } else {
-          await downloadInApp(item);
         }
+        await downloadInApp(item);
       };
 
       return (
@@ -2435,7 +2551,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
                       if (item.type === "link") {
                         window.open(item.url, "_blank", "noopener,noreferrer");
                       } else {
-                        setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) });
+                        setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item), id: item.id });
                       }
                     }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
                       🌐 أونلاين
@@ -2493,7 +2609,10 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       <div style={{ padding: "12px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
         {loading && <p style={{ color: T.subtext, textAlign: "center" }}>جاري التحميل...</p>}
         {!loading && currentItems.length === 0 && <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>هذا المجلد فارغ</p></div>}
-        {currentItems.map((item, index) => renderItem(item, index))}
+        {(() => {
+          const safeItems = Array.isArray(currentItems) ? currentItems.filter(Boolean) : [];
+          return safeItems.map((item, index) => renderItem(item, index));
+        })()}
       </div>
 
       <Modal open={showAddFolderModal} title="إنشاء مجلد جديد" onClose={() => setShowAddFolderModal(false)} footer={(
@@ -2651,33 +2770,41 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
               <button onClick={() => setSelSub(null)} style={{ background: "transparent", border: "none", color: T.accent, cursor: "pointer", fontSize: "14px", fontFamily: "'Cairo',sans-serif", marginBottom: "12px" }}>← رجوع</button>
               <h3 style={{ color: T.text, marginBottom: "12px" }}>{selSub}</h3>
             </div>
-            {items.length === 0 ? <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>لا يوجد محتوى بعد</p></div> :
-              items.map((item, i) => (
-                <div key={i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", backdropFilter: "blur(10px)" }}>
-                  {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700" }}>المدرس: {item.teacher}</p>}
-                  <p style={{ margin: "0 0 6px", fontWeight: "700", color: T.text }}>{item.title}</p>
-                  {item.description && <p style={{ margin: "0 0 8px", fontSize: "13px", color: T.subtext }}>{item.description}</p>}
-                  {item.url && (() => {
-                    const fileId = getOfflineItemId(item);
-                    const isOfflineSaved = savedIds.has(fileId);
-                    const prog = dlProgress[fileId];
-                    const isDownloading = typeof prog === "number";
-                    return (
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                        <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
-                          {isOfflineSaved ? "📂 فتح" : "🌐 أونلاين"}
-                        </button>
-                        {!isOfflineSaved && !isDownloading && (
-                          <button onClick={() => handleFoundationSave(item)} style={{ background: T.sectionBg, color: T.accent, border: `1.5px solid ${T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>⬇️ حفظ بدون إنترنت</button>
-                        )}
-                        {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ جاري الحفظ...</span>}
-                        {isOfflineSaved && <span style={{ fontSize: "11px", color: "#238636", fontWeight: "700" }}>✅ متاح بدون إنترنت</span>}
-                      </div>
-                    );
-                  })()}
+            {(() => {
+              const safeItems = Array.isArray(items) ? items.filter(Boolean) : [];
+              return safeItems.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px" }}>
+                  <div style={{ fontSize: "48px" }}>📭</div>
+                  <p style={{ color: T.subtext }}>لا يوجد محتوى بعد</p>
                 </div>
-              ))
-            }
+              ) : (
+                safeItems.map((item, i) => (
+                  <div key={i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", backdropFilter: "blur(10px)" }}>
+                    {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700" }}>المدرس: {item.teacher}</p>}
+                    <p style={{ margin: "0 0 6px", fontWeight: "700", color: T.text }}>{item.title}</p>
+                    {item.description && <p style={{ margin: "0 0 8px", fontSize: "13px", color: T.subtext }}>{item.description}</p>}
+                    {item.url && (() => {
+                      const fileId = getOfflineItemId(item);
+                      const isOfflineSaved = savedIds.has(fileId);
+                      const prog = dlProgress[fileId];
+                      const isDownloading = typeof prog === "number";
+                      return (
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                          <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+                            {isOfflineSaved ? "📂 فتح" : "🌐 أونلاين"}
+                          </button>
+                          {!isOfflineSaved && !isDownloading && (
+                            <button onClick={() => handleFoundationSave(item)} style={{ background: T.sectionBg, color: T.accent, border: `1.5px solid ${T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>⬇️ حفظ بدون إنترنت</button>
+                          )}
+                          {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ جاري الحفظ...</span>}
+                          {isOfflineSaved && <span style={{ fontSize: "11px", color: "#238636", fontWeight: "700" }}>✅ متاح بدون إنترنت</span>}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ))
+              );
+            })()}
           </div>
         )}
       </div>
@@ -4797,9 +4924,11 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const getSubjectKey = () => {
     if (!selectedGrade || !selectedBranch) return "";
-    const isGrade11 = selectedGrade.includes("حادي عشر");
+    const canonicalSelectedGrade = canonicalizeGrade(selectedGrade);
+    const canonicalSelectedBranch = canonicalizeBranch(selectedBranch);
+    const isGrade11 = canonicalSelectedGrade.includes("حادي عشر");
     const semesterKey = isGrade11 ? selectedSemester : "فصل واحد";
-    return `${selectedGrade}_${selectedBranch}_${semesterKey}`;
+    return `${canonicalSelectedGrade}_${canonicalSelectedBranch}_${semesterKey}`;
   };
 
   const subjectKey = getSubjectKey();
@@ -4822,7 +4951,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const availableSubjects = getAvailableSubjects();
 
   useEffect(() => {
-    const isG11 = selectedGrade.includes("حادي عشر");
+    const isG11 = canonicalizeGrade(selectedGrade).includes("حادي عشر");
     if (isG11 && !["فصل أول", "فصل ثان"].includes(selectedSemester)) {
       setSelectedSemester("فصل أول");
     }
@@ -4975,48 +5104,55 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     saveFolderData(newData);
   };
 
-  const renderItems = (items, depth = 0) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-      {items.map(item => {
-        if (!item || typeof item !== "object") return null;
-        if (item.type === "folder") {
-          const nestedCount = countNestedItems(item);
-          return (
-            <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-                <div style={{ flex: 1 }}>
-                  <div>📁 {item.name} ({nestedCount} عنصر)</div>
-                  {item.children?.length > 0 && (
-                    <div style={{ color: T.subtext, fontSize: "12px", marginTop: "4px" }}>
-                      يحتوي على {item.children.length} عنصر فرعي
-                    </div>
-                  )}
+  const renderItems = (items, depth = 0) => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        {items.map((item) => {
+          if (!item || typeof item !== "object") return null;
+
+          if (item.type === "folder") {
+            const nestedCount = countNestedItems(item);
+            return (
+              <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+                  <div style={{ flex: 1 }}>
+                    <div>📁 {item.name} ({nestedCount} عنصر)</div>
+                    {item.children?.length > 0 && (
+                      <div style={{ color: T.subtext, fontSize: "12px", marginTop: "4px" }}>
+                        يحتوي على {item.children.length} عنصر فرعي
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button onClick={() => { setTargetFolderId(item.id); setShowAddFileModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                      + إضافة ملف
+                    </button>
+                    <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                      🗑️ حذف
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                  <button onClick={() => { setTargetFolderId(item.id); setShowAddFileModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
-                    + إضافة ملف
-                  </button>
-                  <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️ حذف</button>
-                </div>
+                {item.children?.length > 0 && (
+                  <div style={{ marginTop: "8px" }}>
+                    {renderItems(item.children, depth + 1)}
+                  </div>
+                )}
               </div>
-              {item.children?.length > 0 && (
-                <div style={{ marginTop: "8px" }}>
-                  {renderItems(item.children, depth + 1)}
-                </div>
-              )}
+            );
+          }
+
+          return (
+            <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>📄 {item.title}</div>
+              <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                🗑️ حذف
+              </button>
             </div>
           );
-        }
-
-        return (
-          <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>📄 {item.title}</div>
-            <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️ حذف</button>
-          </div>
-        );
-      })}
-    </div>
-  );
+        })}
+      </div>
+    );
+  };
 
   return (
     <AdminSection title="إدارة المجلدات" icon="📁" T={T} onBack={onBack} onSave={() => {}}>
