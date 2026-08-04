@@ -232,6 +232,47 @@ function getDownloadUrl(inputUrl) {
   return inputUrl;
 }
 
+function hasFileExtension(name) {
+  return typeof name === "string" && /\.[a-zA-Z0-9]{1,6}$/.test(name.trim());
+}
+
+function getExtensionFromUrl(url) {
+  if (!url || typeof url !== "string") return null;
+  const match = url.match(/\.([a-zA-Z0-9]{1,6})(?:[?#]|$)/);
+  if (!match) return null;
+  return match[1].toLowerCase();
+}
+
+function getExtensionFromMime(mime) {
+  if (!mime || typeof mime !== "string") return null;
+  const type = mime.split(";")[0].trim().toLowerCase();
+  if (type === "application/pdf") return "pdf";
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/png") return "png";
+  if (type === "image/gif") return "gif";
+  if (type === "image/webp") return "webp";
+  if (type === "image/svg+xml") return "svg";
+  if (type === "application/msword") return "doc";
+  if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
+  if (type === "application/vnd.ms-excel") return "xls";
+  if (type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return "xlsx";
+  if (type === "text/plain") return "txt";
+  if (type.startsWith("image/")) return type.split("/")[1] || null;
+  if (type.startsWith("video/")) return type.split("/")[1] || null;
+  return null;
+}
+
+function ensureFileNameWithExtension(item, blob) {
+  const rawName = ((item?.title || item?.name || "sawaed-file") + "").trim();
+  const sanitizedBase = rawName.replace(/[^a-zA-Z0-9\u0600-\u06FF.\-_]/g, "_");
+  if (hasFileExtension(sanitizedBase)) return sanitizedBase;
+
+  const extFromUrl = getExtensionFromUrl(item?.url);
+  const extFromMime = getExtensionFromMime(getFileMimeType(item, blob));
+  const extension = extFromUrl || extFromMime || "pdf";
+  return `${sanitizedBase}.${extension}`;
+}
+
 function downloadBlobToDevice(blob, filename) {
   if (!blob) throw new Error("No blob available to download");
   const url = URL.createObjectURL(blob);
@@ -242,6 +283,36 @@ function downloadBlobToDevice(blob, filename) {
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadItemToDevice(item) {
+  if (!item?.url) return;
+  const isDriveLink = typeof isDriveUrl === "function" && isDriveUrl(item.url);
+  const directDriveUrl = getDriveDirectUrl(item.url);
+  const targets = isDriveLink
+    ? [driveProxyUrl(item.url), directDriveUrl, driveDownloadUrl(item.url)]
+    : [getDownloadUrl(item.url)];
+
+  const expectedTypes = ["application/pdf", "image/", "application/octet-stream"];
+  let blob = null;
+
+  for (const targetUrl of targets) {
+    if (!targetUrl) continue;
+    try {
+      blob = await fetchBinaryBlob(targetUrl, expectedTypes);
+      if (blob && blob.size > 0) break;
+    } catch (err) {
+      console.warn("downloadItemToDevice candidate failed:", err?.message || err);
+    }
+  }
+
+  if (!blob) {
+    window.open(getDownloadUrl(item.url), "_blank");
+    return;
+  }
+
+  const filename = ensureFileNameWithExtension(item, blob);
+  downloadBlobToDevice(blob, filename);
 }
 
 async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"]) {
@@ -1505,22 +1576,18 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
           <p style={{ margin: "10px 0 0", color: T.subtext, fontSize: "14px" }}>لم يتم إضافة مواد لصفك بعد.</p>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "14px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
           {subjects.map(sub => {
             const { pct, done, total } = getProgress(sub);
             return (
-              <div key={sub} onClick={() => onSubject({ subject: sub, grade: currentUser.grade, branch: currentUser.branch })} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "20px", padding: "16px", display: "flex", alignItems: "center", gap: "14px", cursor: "pointer", boxShadow: T.shadow, transition: "transform 0.2s" }}>
-                <div style={{ width: "56px", height: "56px", borderRadius: "16px", background: darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "28px" }}>
-                  {config.subjectIcons?.[sub] || EMOJI[sub] || "📖"}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: T.text }}>{sub}</h4>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "8px", marginBottom: "4px" }}>
-                    <span style={{ fontSize: "11px", color: T.subtext }}>{done}/{total} درس مكتمل</span>
-                    <span style={{ fontSize: "11px", fontWeight: "800", color: config.progressBarColor || T.accent }}>{pct}%</span>
+              <div key={sub} onClick={() => onSubject({ subject: sub, grade: currentUser.grade, branch: currentUser.branch })} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "14px", cursor: "pointer", boxShadow: T.shadow, transition: "transform 0.2s" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+                  <div style={{ width: "40px", height: "40px", borderRadius: "12px", background: darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}>
+                    {config.subjectIcons?.[sub] || EMOJI[sub] || "📖"}
                   </div>
-                  <div style={{ background: darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)", height: "6px", borderRadius: "3px", overflow: "hidden" }}>
-                    <div style={{ width: `${pct}%`, height: "100%", background: config.progressBarColor || T.accent, borderRadius: "3px" }} />
+                  <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                    <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "15px", fontWeight: "700", color: T.text }}>{sub}</span>
+                    <span style={{ fontSize: "11px", color: T.subtext, marginTop: "2px" }}>{done}/{total} درس مكتمل · {pct}%</span>
                   </div>
                 </div>
                 <span style={{ color: T.subtext, fontSize: "18px", paddingRight: "4px" }}>‹</span>
@@ -2025,9 +2092,9 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
         )}
       </div>
 
-      <div style={{ padding: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "14px" }}>
+      <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
         {sections.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", background: T.card, borderRadius: "16px", border: `1px solid ${T.cardBorder}`, gridColumn: "1 / -1" }}>
+          <div style={{ textAlign: "center", padding: "40px", background: T.card, borderRadius: "16px", border: `1px solid ${T.cardBorder}`, width: "100%" }}>
             <div style={{ fontSize: "48px" }}>📭</div>
             <p style={{ color: T.subtext }}>لا توجد أقسام مضافة لهذه المادة</p>
             <p style={{ color: T.subtext, fontSize: "12px" }}>يمكنك إضافة أقسام من لوحة الإدارة → أقسام المادة</p>
@@ -2048,9 +2115,9 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
             };
 
             return (
-              <button key={sec} onClick={handleOpenFolder} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "16px", display: "flex", alignItems: "center", gap: "14px", cursor: "pointer", backdropFilter: "blur(10px)", textAlign: "right" }}>
-                <span style={{ fontSize: "26px" }}>{SEC_EMOJI?.[sec] || "📌"}</span>
-                <span style={{ fontSize: "15px", fontWeight: "600", color: T.text, flex: 1 }}>{sec}</span>
+              <button key={sec} onClick={handleOpenFolder} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", cursor: "pointer", backdropFilter: "blur(10px)", textAlign: "right", width: "100%" }}>
+                <span style={{ fontSize: "22px" }}>{SEC_EMOJI?.[sec] || "📌"}</span>
+                <span style={{ fontSize: "15px", fontWeight: "600", color: T.text, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{sec}</span>
                 <span style={{ color: T.subtext, fontSize: "16px" }}>‹</span>
               </button>
             );
@@ -2472,10 +2539,10 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const renderItem = (item, index) => {
     if (item.type === "folder") {
       return (
-        <div key={index} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", marginBottom: "10px", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ fontSize: "28px" }}>📁</div>
-          <div style={{ flex: 1, cursor: "pointer" }} onClick={() => navigateToFolder(item.name)}>
-            <p style={{ margin: 0, fontWeight: "700", color: T.text }}>{item.name}</p>
+        <div key={index} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", marginBottom: "10px", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0, justifyContent: "flex-start", direction: "rtl", cursor: "pointer" }} onClick={() => navigateToFolder(item.name)}>
+            <span style={{ fontSize: "24px", flexShrink: 0 }}>📂</span>
+            <p style={{ margin: 0, fontWeight: "700", color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</p>
           </div>
           {canEditStructure && editorMode && (
             <div style={{ display: "flex", gap: "8px" }}>
@@ -2505,70 +2572,50 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       };
 
       return (
-        <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "14px", marginBottom: "10px", backdropFilter: "blur(10px)", transition: "border-color 0.3s" }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-            <div style={{ fontSize: "28px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: "0 0 4px", fontWeight: "700", color: T.text, fontSize: "14px" }}>{item.title}</p>
-              {item.description && <p style={{ margin: "0 0 6px", fontSize: "12px", color: T.subtext }}>{item.description}</p>}
+        <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginBottom: "10px", backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "100%" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: "24px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
+            <div style={{ minWidth: 0, overflow: "hidden" }}>
+              <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "14px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</p>
+              {item.description && <p style={{ margin: 0, fontSize: "11px", color: T.subtext, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.description}</p>}
+            </div>
+          </div>
 
-              {/* شارة الحالة */}
-              {(isOfflineSaved && prog !== "done") && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#23863618", color: "#238636", fontSize: "11px", padding: "3px 10px", borderRadius: "20px", fontWeight: "700", marginBottom: "8px", border: "1px solid #23863630" }}>✅ متاح بدون إنترنت</span>
-              )}
-              {prog === "done" && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#23863618", color: "#238636", fontSize: "11px", padding: "3px 10px", borderRadius: "20px", fontWeight: "700", marginBottom: "8px" }}>✅ تم الحفظ بنجاح!</span>
-              )}
-              {prog === "error" && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", background: "#e5533318", color: "#e55333", fontSize: "11px", padding: "3px 10px", borderRadius: "20px", fontWeight: "700", marginBottom: "8px" }}>⚠️ تعذّر الحفظ التلقائي</span>
-              )}
-
-              {/* شريط التقدم */}
-              {isDownloading && (
-                <div style={{ marginBottom: "8px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "3px" }}>
-                    <span style={{ fontSize: "11px", color: T.subtext }}>جاري الحفظ للأوفلاين...</span>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: T.accent }}>{prog}%</span>
-                  </div>
-                  <div style={{ background: "rgba(0,0,0,0.1)", height: "5px", borderRadius: "3px", overflow: "hidden" }}>
-                    <div style={{ width: `${prog}%`, height: "100%", background: `linear-gradient(90deg,${T.accent},${T.accent2})`, borderRadius: "3px", transition: "width 0.3s" }} />
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", alignItems: "center" }}>
-                {item.url && !isDownloading && (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-start", paddingLeft: "12px" }}>
+            {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ {prog}%</span>}
+            {item.url && !isDownloading && (
+              <>
+                <button onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (item.type === "link") {
+                    window.open(item.url, "_blank", "noopener,noreferrer");
+                  } else {
+                    setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item), id: item.id });
+                  }
+                }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+                  🌐 أونلاين
+                </button>
+                {item.type !== "link" && (
                   <>
-                    <button onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (item.type === "link") {
-                        window.open(item.url, "_blank", "noopener,noreferrer");
-                      } else {
-                        setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item), id: item.id });
-                      }
-                    }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
-                      🌐 أونلاين
+                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                      {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ للمعاينة أوفلاين"}
                     </button>
-                    {item.type !== "link" && (
-                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
-                        {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ"}
+                    {isOfflineSaved && (
+                      <button onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "7px 10px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                        🗑️
                       </button>
                     )}
-                    {isOfflineSaved && (
-                      <button onClick={async () => {
-                        if (!window.confirm(`حذف النسخة الأوفلاين من "${item.title}"؟`)) return;
-                        await idbDeleteFile(fileId);
-                        setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; });
-                      }} title="حذف من التخزين المحلي" style={{ background: "#e5533310", color: "#e55333", border: "1px solid #e5533330", borderRadius: "10px", padding: "7px 9px", fontSize: "12px", cursor: "pointer" }}>🗑️</button>
-                    )}
+                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); downloadItemToDevice(item); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                      ⬇️ حفظ للجهاز
+                    </button>
                   </>
                 )}
-                {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>يرجى الانتظار...</span>}
-                <button onClick={() => toggleStar(item)} style={{ background: "transparent", border: "none", fontSize: "20px", cursor: "pointer", marginRight: "auto" }}>{isStarred(item) ? "⭐" : "☆"}</button>
-                {canEditStructure && editorMode && <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>}
-              </div>
-            </div>
+              </>
+            )}
+            {prog === "error" && <span style={{ fontSize: "11px", color: "#e55333", fontWeight: "700" }}>⚠️</span>}
+            <button onClick={() => toggleStar(item)} style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", flexShrink: 0 }}>{isStarred(item) ? "⭐" : "☆"}</button>
+            {canEditStructure && editorMode && <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>}
           </div>
         </div>
       );
@@ -2600,7 +2647,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
         </div>
       )}
 
-      <div style={{ padding: "12px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
+      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
         {loading && <p style={{ color: T.subtext, textAlign: "center" }}>جاري التحميل...</p>}
         {!loading && currentItems.length === 0 && <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>هذا المجلد فارغ</p></div>}
         {(() => {
@@ -2772,31 +2819,42 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
                   <p style={{ color: T.subtext }}>لا يوجد محتوى بعد</p>
                 </div>
               ) : (
-                safeItems.map((item, i) => (
-                  <div key={i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", backdropFilter: "blur(10px)" }}>
-                    {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700" }}>المدرس: {item.teacher}</p>}
-                    <p style={{ margin: "0 0 6px", fontWeight: "700", color: T.text }}>{item.title}</p>
-                    {item.description && <p style={{ margin: "0 0 8px", fontSize: "13px", color: T.subtext }}>{item.description}</p>}
-                    {item.url && (() => {
-                      const fileId = getOfflineItemId(item);
-                      const isOfflineSaved = savedIds.has(fileId);
-                      const prog = dlProgress[fileId];
-                      const isDownloading = typeof prog === "number";
-                      return (
-                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-                          <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
-                            {isOfflineSaved ? "📂 فتح" : "🌐 أونلاين"}
-                          </button>
-                          {!isOfflineSaved && !isDownloading && (
-                            <button onClick={() => handleFoundationSave(item)} style={{ background: T.sectionBg, color: T.accent, border: `1.5px solid ${T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>⬇️ حفظ بدون إنترنت</button>
-                          )}
-                          {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ جاري الحفظ...</span>}
-                          {isOfflineSaved && <span style={{ fontSize: "11px", color: "#238636", fontWeight: "700" }}>✅ متاح بدون إنترنت</span>}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                ))
+                safeItems.map((item, i) => {
+                  const fileId = getOfflineItemId(item);
+                  const isOfflineSaved = savedIds.has(fileId);
+                  const prog = dlProgress[fileId];
+                  const isDownloading = typeof prog === "number";
+                  return (
+                    <div key={i} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px" }}>
+                      <div style={{ minWidth: 0, overflow: "hidden" }}>
+                        {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700" }}>المدرس: {item.teacher}</p>}
+                        <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "14px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</p>
+                        {item.description && <p style={{ margin: 0, fontSize: "12px", color: T.subtext, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.description}</p>}
+                      </div>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-start", paddingLeft: "12px" }}>
+                        {item.url && !isDownloading && (
+                          <>
+                            <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+                              🌐 أونلاين
+                            </button>
+                            <button onClick={() => handleFoundationSave(item)} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                              {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ للمعاينة أوفلاين"}
+                            </button>
+                            {isOfflineSaved && (
+                              <button onClick={async () => { await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "8px 10px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                                🗑️
+                              </button>
+                            )}
+                            <button onClick={() => downloadItemToDevice(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                              ⬇️ حفظ للجهاز
+                            </button>
+                          </>
+                        )}
+                        {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳</span>}
+                      </div>
+                    </div>
+                  );
+                })
               );
             })()}
           </div>

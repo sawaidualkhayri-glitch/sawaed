@@ -15,11 +15,12 @@ export default function FileCard({ item, onClick, T, darkMode }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '14px',
+        gap: '12px',
         background: T?.card || 'rgba(255,255,255,0.08)',
         border: `1px solid ${T?.cardBorder || 'rgba(255,255,255,0.14)'}`,
-        borderRadius: '16px',
-        padding: '16px',
+        borderRadius: '12px',
+        padding: '10px 18px',
+        minHeight: '54px',
         cursor: 'pointer',
         backdropFilter: 'blur(12px)',
         boxShadow: T?.shadow || '0 10px 28px rgba(0,0,0,0.12)',
@@ -37,7 +38,7 @@ export default function FileCard({ item, onClick, T, darkMode }) {
         e.currentTarget.style.boxShadow = T?.shadow || '0 10px 28px rgba(0,0,0,0.12)';
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, overflow: 'hidden' }}>
         <div style={{
           width: '48px',
           height: '48px',
