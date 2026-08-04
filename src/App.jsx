@@ -3505,7 +3505,6 @@ function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermiss
     { id: "nav", label: "الصفحات والتنقل", icon: "🧭", isAllowed: (currentRole) => ["super_admin", "editor_full"].includes(currentRole) },
     { id: "contact", label: "روابط التواصل", icon: "📞", isAllowed: (currentRole) => ["super_admin", "editor_full", "editor_news"].includes(currentRole) },
     { id: "editors", label: "إدارة المحررين", icon: "🛡️", isAllowed: (currentRole) => ["super_admin", "admin"].includes(currentRole) },
-    { id: "password", label: "تغيير كلمة السر", icon: "🔐", isAllowed: (currentRole) => currentRole === "super_admin" },
   ];
 
   const isSectionAllowed = (id) => {
