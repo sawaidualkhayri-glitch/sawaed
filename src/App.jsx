@@ -445,9 +445,16 @@ function resetNav() {
 // FIREBASE SDK OVER FETCH SIMULATION
 // ============================================================
 
-const FB_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
+const FB_BASE = firebaseConfig?.projectId
+  ? `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`
+  : "";
+
+function hasFirestoreBackend() {
+  return Boolean(FB_BASE);
+}
 
 async function fbGet(collection, docId) {
+  if (!hasFirestoreBackend()) return null;
   try {
     const url = docId ? `${FB_BASE}/${collection}/${docId}` : `${FB_BASE}/${collection}`;
     const headers = await getFirestoreAuthHeaders();
@@ -467,6 +474,7 @@ async function fbGet(collection, docId) {
 }
 
 async function fbSet(collection, docId, fields) {
+  if (!hasFirestoreBackend()) return false;
   try {
     const body = { fields: toFirestoreFields(fields) };
     const url = `${FB_BASE}/${collection}/${docId}`;
@@ -489,6 +497,7 @@ async function fbSet(collection, docId, fields) {
 }
 
 async function fbAdd(collection, fields) {
+  if (!hasFirestoreBackend()) return null;
   try {
     const body = { fields: toFirestoreFields(fields) };
     const url = `${FB_BASE}/${collection}`;
@@ -512,10 +521,20 @@ async function fbAdd(collection, fields) {
 }
 
 async function fbDelete(collection, docId) {
+  if (!hasFirestoreBackend()) return false;
   try {
-    const res = await fetch(`${FB_BASE}/${collection}/${docId}`, { method: "DELETE" });
-    return res.ok;
-  } catch { return false; }
+    const headers = await getFirestoreAuthHeaders();
+    const res = await fetch(`${FB_BASE}/${collection}/${docId}`, { method: "DELETE", headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("fbDelete failed", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("fbDelete exception", { collection, docId, error: err });
+    return false;
+  }
 }
 
 function parseFirestoreDoc(doc) {
@@ -603,6 +622,13 @@ function normalizeFolderKey({ grade = "", branch = "", semester = "", subject = 
   return `folder_${normalizeKeyPart(canonicalizeGrade(grade))}_${normalizeKeyPart(canonicalizeBranch(branch))}_${normalizeKeyPart(canonicalizeSemester(grade, semester))}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`;
 }
 
+function getFolderKeyCandidates({ grade = "", branch = "", semester = "", subject = "", section = "", storageKey = "" } = {}) {
+  const candidates = new Set();
+  if (storageKey) candidates.add(storageKey);
+  getFolderKeyVariants({ grade, branch, semester, subject, section }).forEach((key) => candidates.add(key));
+  return Array.from(candidates);
+}
+
 function normalizeFoundKey({ subject = "", branch = "", type = "", sub = "" } = {}) {
   return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(canonicalizeBranch(branch || "عام"))}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
 }
@@ -618,7 +644,9 @@ function getFolderKeyVariants({ grade = "", branch = "", semester = "", subject 
   }
   if (canonicalSemesterValue === "فصل واحد") {
     variants.add(`folder_${normalizeKeyPart(canonicalGrade)}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
-    variants.add(`folder_${normalizeKeyPart("ثاني عشر")}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+    if (canonicalGrade === "ثاني عشر (توجيهي)") {
+      variants.add(`folder_${normalizeKeyPart("ثاني عشر")}_${normalizeKeyPart(canonicalBranch)}_${normalizeKeyPart(subject)}_${normalizeKeyPart(section)}`);
+    }
   }
   return Array.from(variants);
 }
@@ -982,7 +1010,7 @@ export default function App() {
       needsUpdate = true;
     }
 
-    if (!config.editors || config.editors.length === 0) {
+    if (config.editors === undefined) {
       newConfig.editors = [...DEFAULT_CONFIG.editors];
       needsUpdate = true;
     }
@@ -5100,24 +5128,45 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
       }
 
       try {
-        const fbDoc = await fbGet("folder_items", storageKey);
-        if (fbDoc && Array.isArray(fbDoc.items)) {
-          const normalized = normalizeItemTree(fbDoc.items);
-          if (!cancelled) setFolderData(normalized);
-          return;
+        const candidateKeys = getFolderKeyCandidates({
+          grade: subjectGrade || selectedGrade,
+          branch: subjectBranch || selectedBranch,
+          semester: subjectSemester || selectedSemester,
+          subject: selectedSubject,
+          section: selectedSection,
+          storageKey,
+        });
+
+        for (const candidateKey of candidateKeys) {
+          const fbDoc = await fbGet("folder_items", candidateKey);
+          if (fbDoc && Array.isArray(fbDoc.items)) {
+            const normalized = normalizeItemTree(fbDoc.items);
+            if (!cancelled) setFolderData(normalized);
+            return;
+          }
         }
       } catch (err) {
         console.warn("Failed to load global folder_items for AdminFolders:", err);
       }
 
-      const raw = config[storageKey];
-      if (raw) {
-        try {
-          const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-          if (!cancelled) setFolderData(normalizeItemTree(parsed));
-          return;
-        } catch {
-          // fallback to empty
+      const candidateKeys = getFolderKeyCandidates({
+        grade: subjectGrade || selectedGrade,
+        branch: subjectBranch || selectedBranch,
+        semester: subjectSemester || selectedSemester,
+        subject: selectedSubject,
+        section: selectedSection,
+        storageKey,
+      });
+      for (const candidateKey of candidateKeys) {
+        const raw = config[candidateKey];
+        if (raw) {
+          try {
+            const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+            if (!cancelled) setFolderData(normalizeItemTree(parsed));
+            return;
+          } catch {
+            // fallback to empty
+          }
         }
       }
 
@@ -5131,11 +5180,22 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const saveFolderData = async (newData) => {
     if (!storageKey) return;
     const normalized = normalizeItemTree(newData);
-    const newConfig = { ...config, [storageKey]: JSON.stringify(normalized) };
+    const candidateKeys = getFolderKeyCandidates({
+      grade: subjectGrade || selectedGrade,
+      branch: subjectBranch || selectedBranch,
+      semester: subjectSemester || selectedSemester,
+      subject: selectedSubject,
+      section: selectedSection,
+      storageKey,
+    });
+    const newConfig = { ...config };
+    candidateKeys.forEach((key) => {
+      newConfig[key] = JSON.stringify(normalized);
+    });
     setFolderData(normalized);
     await saveConfig(newConfig);
     try {
-      await fbSet("folder_items", storageKey, { items: normalized });
+      await Promise.all(candidateKeys.map((key) => fbSet("folder_items", key, { items: normalized })));
     } catch (err) {
       console.warn("Failed to persist folder_items globally for AdminFolders:", err);
     }
@@ -5192,9 +5252,9 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     resetFileModal();
   };
 
-  const deleteItem = (itemId) => {
+  const deleteItem = async (itemId) => {
     const newData = removeItemFromTree(folderData, itemId);
-    saveFolderData(newData);
+    await saveFolderData(newData);
   };
 
   const renderItems = (items, depth = 0) => {

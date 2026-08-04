@@ -2,7 +2,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth, db, isFirebaseConfigured } from "./firebase";
 import { logoutUser } from "./firebaseAuth";
 import { cacheJson, clearCachedJson, getCachedJson } from "./offlineHandler";
 import { ALL_EDITOR_ROLES } from "./constants";
@@ -134,6 +134,13 @@ export function AuthProvider({ children }) {
   }, [applyUserProfile]);
 
   useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setAuthLoading(false);
+      setCurrentUser(null);
+      setNeedsOnboarding(false);
+      return;
+    }
+
     let mounted = true;
 
     const restoreCachedSession = async () => {

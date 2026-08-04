@@ -21,6 +21,7 @@ async function isCurrentUserSuperAdmin() {
   if (current.uid === ADMIN_UID || email === ADMIN_EMAIL) return true;
 
   try {
+    assertFirestoreConfigured();
     const selfDoc = await getDoc(doc(db, "users", current.uid));
     if (!selfDoc.exists()) return false;
     const role = (selfDoc.data()?.role || "").toString().trim().toLowerCase();
@@ -54,6 +55,15 @@ function normalizeRole(role) {
   return value || "user";
 }
 
+function assertFirestoreConfigured() {
+  if (!db) {
+    const error = new Error("Firebase Firestore is not configured.");
+    error.code = "auth/internal-error";
+    throw error;
+  }
+  return db;
+}
+
 async function assertPrimarySuperAdminSession() {
   // Do not pre-emptively throw client-side permission errors.
   // Let Firestore security rules be the ultimate authority.
@@ -78,6 +88,7 @@ async function ensureUserProfile(firebaseUser, fallbackUsername = "", role = "us
   const uid = firebaseUser?.uid || extraProfile?.uid;
   if (!uid) return null;
 
+  assertFirestoreConfigured();
   const userRef = doc(db, "users", uid);
   const existingSnap = await getDoc(userRef);
   const existingProfile = existingSnap.exists() ? existingSnap.data() : {};
@@ -145,6 +156,7 @@ export const loginWithEmail = async (email, password) => {
 async function resolveUsernameToEmail(identifier) {
   const trimmedIdentifier = (identifier || "").trim();
   if (!trimmedIdentifier) return null;
+  assertFirestoreConfigured();
 
   const usernameDocRef = doc(db, "usernames", trimmedIdentifier.toLowerCase());
   try {
@@ -165,6 +177,7 @@ async function resolveUsernameToEmail(identifier) {
 async function lookupIdentifierInFirestore(identifier) {
   const trimmedIdentifier = (identifier || "").trim();
   if (!trimmedIdentifier) return null;
+  assertFirestoreConfigured();
 
   if (trimmedIdentifier.includes("@")) {
     const normalizedEmail = trimmedIdentifier.toLowerCase();
@@ -417,6 +430,7 @@ export const loginWithGoogle = async () => {
   const result = await signInWithPopup(auth, provider);
   const user = result.user;
 
+  assertFirestoreConfigured();
   const userRef = doc(db, "users", user.uid);
   const snap = await getDoc(userRef);
   const profileData = {
