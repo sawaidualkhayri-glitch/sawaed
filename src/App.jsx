@@ -4597,6 +4597,7 @@ function AdminAnnouncements({ config, saveConfig, T, onBack }) {
 
 function AdminNews({ config, saveConfig, T, onBack }) { 
   const [news, setNews] = useState([]); 
+  const [loading, setLoading] = useState(true);
   const [pinnedIds, setPinnedIds] = useState(() => { 
     const raw = config.pinnedNews; 
     return raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []; 
@@ -4605,11 +4606,17 @@ function AdminNews({ config, saveConfig, T, onBack }) {
   const [saving, setSaving] = useState(false); 
 
   useEffect(() => { 
+    let isMounted = true;
+    setLoading(true);
     fbGet("news").then(d => { 
+      if (!isMounted) return;
       if (d) setNews(d.sort((a, b) => b.createdAt - a.createdAt)); 
+      setLoading(false);
+    }).catch(() => {
+      if (isMounted) setLoading(false);
     });
-    return () => unsubscribe && unsubscribe();
-  }, [role, localAuthLoading, localCurrentUser]);
+    return () => { isMounted = false; };
+  }, []);
 
   // دالة النشر المحدثة لحل مشكلة تعليق السيرفر الوهمي "فش نت"
   const addNews = async () => { 
@@ -4666,7 +4673,17 @@ function AdminNews({ config, saveConfig, T, onBack }) {
           {saving ? "⏳..." : "📢 نشر الخبر"} 
         </button> 
       </div> 
-      {news.map(n => ( 
+      {loading ? ( 
+        <div style={{ textAlign: "center", padding: "40px" }}> 
+          <div style={{ fontSize: "24px" }}>⏳</div> 
+          <p style={{ color: T.subtext }}>جاري تحميل الأخبار...</p> 
+        </div> 
+      ) : news.length === 0 ? ( 
+        <div style={{ textAlign: "center", padding: "40px" }}> 
+          <div style={{ fontSize: "48px" }}>📭</div> 
+          <p style={{ color: T.subtext }}>لا توجد أخبار بعد</p> 
+        </div> 
+      ) : news.map(n => ( 
         <div key={n.id} style={{ background: T.card, border: `1px solid ${pinnedIds.includes(n.id) ? T.accent + "66" : T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", display: "flex", gap: "10px", alignItems: "center" }}> 
           <div style={{ flex: 1 }}> 
             <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "13px" }}>{n.title}</p> 
@@ -5074,29 +5091,54 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   };
 
   useEffect(() => {
-    if (!storageKey) {
-      setFolderData([]);
-      return;
-    }
-    const raw = config[storageKey];
-    if (raw) {
-      try {
-        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-        setFolderData(normalizeItemTree(parsed));
-      } catch {
+    let cancelled = false;
+
+    const loadFolderData = async () => {
+      if (!storageKey) {
         setFolderData([]);
+        return;
       }
-    } else {
-      setFolderData([]);
-    }
-  }, [storageKey]);
+
+      try {
+        const fbDoc = await fbGet("folder_items", storageKey);
+        if (fbDoc && Array.isArray(fbDoc.items)) {
+          const normalized = normalizeItemTree(fbDoc.items);
+          if (!cancelled) setFolderData(normalized);
+          return;
+        }
+      } catch (err) {
+        console.warn("Failed to load global folder_items for AdminFolders:", err);
+      }
+
+      const raw = config[storageKey];
+      if (raw) {
+        try {
+          const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+          if (!cancelled) setFolderData(normalizeItemTree(parsed));
+          return;
+        } catch {
+          // fallback to empty
+        }
+      }
+
+      if (!cancelled) setFolderData([]);
+    };
+
+    loadFolderData();
+    return () => { cancelled = true; };
+  }, [storageKey, config]);
 
   const saveFolderData = async (newData) => {
     if (!storageKey) return;
     const normalized = normalizeItemTree(newData);
     const newConfig = { ...config, [storageKey]: JSON.stringify(normalized) };
-    await saveConfig(newConfig);
     setFolderData(normalized);
+    await saveConfig(newConfig);
+    try {
+      await fbSet("folder_items", storageKey, { items: normalized });
+    } catch (err) {
+      console.warn("Failed to persist folder_items globally for AdminFolders:", err);
+    }
   };
 
   const inp = {
