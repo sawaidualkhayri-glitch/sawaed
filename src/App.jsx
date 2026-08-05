@@ -695,6 +695,32 @@ function getFolderKeyCandidates({ grade = "", branch = "", semester = "", subjec
   return Array.from(candidates);
 }
 
+function normalizeSubjectList(subjects) {
+  if (!Array.isArray(subjects)) return [];
+  return subjects.map(item => {
+    if (typeof item === "string") return { name: item, active: true };
+    return {
+      name: String(item?.name || "").trim(),
+      active: item?.active !== false,
+    };
+  });
+}
+
+function getSubjectNames(subjects, includeHidden = false) {
+  return normalizeSubjectList(subjects)
+    .filter(item => includeHidden || item.active)
+    .map(item => item.name)
+    .filter(Boolean);
+}
+
+function normalizeSubjectsMap(subjectsMap) {
+  const normalized = {};
+  for (const [key, subjects] of Object.entries(subjectsMap || {})) {
+    normalized[key] = normalizeSubjectList(subjects);
+  }
+  return normalized;
+}
+
 function normalizeFoundKey({ subject = "", branch = "", type = "", sub = "" } = {}) {
   return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(canonicalizeBranch(branch || "عام"))}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
 }
@@ -1600,7 +1626,7 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
     return <div style={{ padding: "20px", color: T.text, textAlign: "center" }}>جارٍ إعادة التوجيه...</div>;
   }
   const key = `${currentUser.grade || ""}_${currentUser.branch || ""}`;
-  const subjects = config.subjects?.[key] || [];
+  const subjects = getSubjectNames(config.subjects?.[key] || []);
 
   const getProgress = (sub) => {
   const lessonKey = `lessons_${key}_${sub}`;
@@ -4388,7 +4414,7 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
   const keys = (config.grades || []).flatMap(g => (config.branches || []).map(b => `${g}_${b}`));
   const [selKey, setSelKey] = useState(keys[0] || "");
   const [selSemester, setSelSemester] = useState("1"); // الافتراضي: الفصل الأول
-  const [subs, setSubs] = useState({ ...config.subjects });
+  const [subs, setSubs] = useState(() => normalizeSubjectsMap(config.subjects || {}));
   const [newSub, setNewSub] = useState("");
 
   // توليد مفتاح فريد مفرز يدمج (الصف + الفرع + الفصل الدراسي) لمنع تداخل المواد تماماً
@@ -4405,6 +4431,34 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
     outline: "none", 
     fontFamily: "'Cairo',sans-serif", 
     direction: "rtl" 
+  };
+
+  const currentSubjects = normalizeSubjectList(subs[currentCompoundKey] || []);
+  const activeSubjects = currentSubjects.filter(item => item.active);
+  const hiddenSubjects = currentSubjects.filter(item => !item.active);
+
+  const addSubject = () => {
+    const trimmed = newSub.trim();
+    if (!trimmed) return;
+    const existingNames = currentSubjects.map(item => item.name);
+    if (existingNames.includes(trimmed)) {
+      setNewSub("");
+      return;
+    }
+    setSubs(p => ({
+      ...p,
+      [currentCompoundKey]: [...currentSubjects, { name: trimmed, active: true }],
+    }));
+    setNewSub("");
+  };
+
+  const toggleSubjectActive = (subjectName) => {
+    setSubs(p => ({
+      ...p,
+      [currentCompoundKey]: normalizeSubjectList(p[currentCompoundKey] || []).map(item =>
+        item.name === subjectName ? { ...item, active: !item.active } : item
+      ),
+    }));
   };
 
   return (
@@ -4425,16 +4479,36 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
 
       <hr style={{ border: `0.5px solid ${T.cardBorder}`, marginBottom: "20px" }} />
 
-      {/* 3. إدارة المواد بناءً على المفتاح المركب الجديد */}
-      <ListEditor 
-        items={subs[currentCompoundKey] || []} 
-        setItems={v => setSubs(p => ({ ...p, [currentCompoundKey]: v }))} 
-        newItem={newSub} 
-        setNewItem={setNewSub} 
-        T={T} 
-        inp={inp} 
-        placeholder="اسم المادة الجديدة..." 
-      />
+      <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+        <input value={newSub} onChange={e => setNewSub(e.target.value)} placeholder="اسم المادة الجديدة..." style={inp} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addSubject(); } }} />
+        <button onClick={addSubject} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "12px", padding: "10px 16px", cursor: "pointer", fontSize: "18px", flexShrink: 0 }}>+</button>
+      </div>
+
+      {currentSubjects.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "30px", background: T.card, borderRadius: "16px", border: `1px solid ${T.cardBorder}` }}>
+          <p style={{ margin: 0, color: T.subtext }}>لم يتم إضافة مواد لهذا الصف بعد.</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {activeSubjects.map(item => (
+            <div key={item.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 14px", background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "14px" }}>
+              <span style={{ color: T.text, fontWeight: "700", fontSize: "14px" }}>{item.name}</span>
+              <button onClick={() => toggleSubjectActive(item.name)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "10px", padding: "8px 12px", cursor: "pointer", fontSize: "13px" }}>إخفاء / ✕</button>
+            </div>
+          ))}
+          {hiddenSubjects.length > 0 && (
+            <div style={{ padding: "10px 14px", background: T.sectionBg, borderRadius: "14px", border: `1px solid ${T.cardBorder}` }}>
+              <p style={{ margin: "0 0 10px", color: T.subtext, fontSize: "13px" }}>المواد المخفية</p>
+              {hiddenSubjects.map(item => (
+                <div key={item.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px", background: "rgba(255,255,255,0.04)", borderRadius: "12px" }}>
+                  <span style={{ color: T.subtext, fontSize: "14px", opacity: 0.7 }}>{item.name}</span>
+                  <button onClick={() => toggleSubjectActive(item.name)} style={{ background: "#36a4f022", border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "10px", padding: "8px 12px", cursor: "pointer", fontSize: "13px" }}>استرجاع / 👁️</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </AdminSection>
   );
 }
@@ -4447,7 +4521,7 @@ function AdminLessons({ config, saveConfig, T, onBack }) {
   
   // المفتاح المركب لقراءة المواد الصحيحة المفصولة بالفصل الدراسي
   const subjectsKey = `${selGB}_sem${selSemester}`;
-  const currentAvailableSubjects = config.subjects?.[subjectsKey] || [];
+  const currentAvailableSubjects = getSubjectNames(config.subjects?.[subjectsKey] || [], true);
 
   const [selSub, setSelSub] = useState(currentAvailableSubjects[0] || "");
   const [color, setColor] = useState(config.progressBarColor || "#6C63FF");
@@ -4460,8 +4534,8 @@ function AdminLessons({ config, saveConfig, T, onBack }) {
 
   // تحديث المادة المختارة تلقائياً عند تغيير الصف أو الفصل الدراسي
   useEffect(() => {
-    setSelSub(currentAvailableSubjects[0] || "");
-  }, [selGB, selSemester]);
+    setSelSub(getSubjectNames(config.subjects?.[subjectsKey] || [], true)[0] || "");
+  }, [selGB, selSemester, config.subjects]);
 
   useEffect(() => {
     const raw = config[lKey];
@@ -4999,7 +5073,7 @@ function AdminSections({ config, saveConfig, T, onBack }) {
     const brs = config.branches || branches;
     brs.forEach(br => {
       const k = `${selectedGrade}_${br}`;
-      (config.subjects?.[k] || []).forEach(sub => allSubs.add(sub));
+      getSubjectNames(config.subjects?.[k] || [], true).forEach(sub => allSubs.add(sub));
     });
     return Array.from(allSubs);
   };
@@ -5127,7 +5201,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     const brs = config.branches || branches;
     brs.forEach(br => {
       const k = `${selectedGrade}_${br}`;
-      (config.subjects?.[k] || []).forEach(sub => allSubs.add(sub));
+      getSubjectNames(config.subjects?.[k] || [], true).forEach(sub => allSubs.add(sub));
     });
     return Array.from(allSubs);
   };
