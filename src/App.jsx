@@ -721,6 +721,32 @@ function normalizeSubjectsMap(subjectsMap) {
   return normalized;
 }
 
+function getCanonicalSubjectKey(grade = "", branch = "") {
+  return `${canonicalizeGrade(grade)}_${canonicalizeBranch(branch)}`;
+}
+
+function findMatchingSubjectEntries(subjectsMap = {}, gradeBranchKey = "") {
+  if (!subjectsMap || !gradeBranchKey) return [];
+  if (subjectsMap[gradeBranchKey]) return subjectsMap[gradeBranchKey];
+
+  const [grade = "", branch = ""] = gradeBranchKey.split("_");
+  const targetGrade = canonicalizeGrade(grade);
+  const targetBranch = canonicalizeBranch(branch);
+
+  for (const key of Object.keys(subjectsMap)) {
+    const [kGrade = "", kBranch = ""] = key.split("_");
+    if (canonicalizeGrade(kGrade) === targetGrade && canonicalizeBranch(kBranch) === targetBranch) {
+      return subjectsMap[key];
+    }
+  }
+
+  return [];
+}
+
+function getSubjectsByGradeBranch(subjectsMap = {}, grade = "", branch = "", includeHidden = false) {
+  return getSubjectNames(findMatchingSubjectEntries(subjectsMap, getCanonicalSubjectKey(grade, branch)), includeHidden);
+}
+
 function normalizeFoundKey({ subject = "", branch = "", type = "", sub = "" } = {}) {
   return `found_${normalizeKeyPart(subject)}_${normalizeKeyPart(canonicalizeBranch(branch || "عام"))}_${normalizeKeyPart(type)}_${normalizeKeyPart(sub)}`;
 }
@@ -1625,8 +1651,9 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
   if (!currentUser) {
     return <div style={{ padding: "20px", color: T.text, textAlign: "center" }}>جارٍ إعادة التوجيه...</div>;
   }
-  const key = `${currentUser.grade || ""}_${currentUser.branch || ""}`;
-  const subjects = getSubjectNames(config.subjects?.[key] || []);
+  const userBranch = currentUser.branch || currentUser.stream || "";
+  const key = getCanonicalSubjectKey(currentUser.grade || "", userBranch);
+  const subjects = getSubjectsByGradeBranch(config.subjects, currentUser.grade, userBranch);
 
   const getProgress = (sub) => {
   const lessonKey = `lessons_${key}_${sub}`;
@@ -4411,14 +4438,29 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
 }
 
 function AdminSubjects({ config, saveConfig, T, onBack }) {
-  const keys = (config.grades || []).flatMap(g => (config.branches || []).map(b => `${g}_${b}`));
-  const [selKey, setSelKey] = useState(keys[0] || "");
+  const subjectKeyOptions = (config.grades || []).flatMap(g =>
+    (config.branches || []).map(b => ({
+      value: getCanonicalSubjectKey(g, b),
+      label: `${g} --- ${b}`,
+    }))
+  );
+  const [selKey, setSelKey] = useState(subjectKeyOptions[0]?.value || "");
   const [selSemester, setSelSemester] = useState("1"); // الافتراضي: الفصل الأول
   const [subs, setSubs] = useState(() => normalizeSubjectsMap(config.subjects || {}));
   const [newSub, setNewSub] = useState("");
 
-  // توليد مفتاح فريد مفرز يدمج (الصف + الفرع + الفصل الدراسي) لمنع تداخل المواد تماماً
-  const currentCompoundKey = `${selKey}_sem${selSemester}`;
+  useEffect(() => {
+    setSubs(normalizeSubjectsMap(config.subjects || {}));
+  }, [config.subjects]);
+
+  useEffect(() => {
+    if (!subjectKeyOptions.some(option => option.value === selKey)) {
+      setSelKey(subjectKeyOptions[0]?.value || "");
+    }
+  }, [subjectKeyOptions, selKey]);
+
+  // توليد مفتاح فريد مفرز يدمج الصف والفرع فقط ليطابق استخدام المواد في الصفحة الرئيسية وإدارة المجلدات
+  const currentCompoundKey = selKey;
 
   const inp = { 
     background: T.inputBg, 
@@ -4433,7 +4475,7 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
     direction: "rtl" 
   };
 
-  const currentSubjects = normalizeSubjectList(subs[currentCompoundKey] || []);
+  const currentSubjects = normalizeSubjectList(findMatchingSubjectEntries(subs, currentCompoundKey));
   const activeSubjects = currentSubjects.filter(item => item.active);
   const hiddenSubjects = currentSubjects.filter(item => !item.active);
 
@@ -4467,7 +4509,7 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
       {/* 1. اختيار الصف والفرع */}
       <label style={{ fontSize: "13px", color: T.subtext, display: "block", marginBottom: "4px" }}>اختر الصف والفرع:</label>
       <select value={selKey} onChange={e => setSelKey(e.target.value)} style={{ ...inp, flex: "unset", width: "100%", marginBottom: "14px", padding: "12px" }}>
-        {keys.map(k => <option key={k} value={k}>{k.replace("_", " --- ")}</option>)}
+        {subjectKeyOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
       </select>
 
       {/* 2. إضافة قائمة اختيار الفصل الدراسي لحل مشكلة الفصل */}
@@ -5200,8 +5242,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     const allSubs = new Set();
     const brs = config.branches || branches;
     brs.forEach(br => {
-      const k = `${selectedGrade}_${br}`;
-      getSubjectNames(config.subjects?.[k] || [], true).forEach(sub => allSubs.add(sub));
+      getSubjectsByGradeBranch(config.subjects, selectedGrade, br, true).forEach(sub => allSubs.add(sub));
     });
     return Array.from(allSubs);
   };
@@ -5224,7 +5265,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     } else {
       setSelectedSubject("");
     }
-  }, [subjectKey]);
+  }, [subjectKey, JSON.stringify(availableSubjects)]);
 
   const [folderData, setFolderData] = useState([]);
 
