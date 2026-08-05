@@ -5005,6 +5005,8 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [selectedSubject, setSelectedSubject] = useState("");
   const [showAddFolderModal, setShowAddFolderModal] = useState(false);
   const [showAddFileModal, setShowAddFileModal] = useState(false);
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [isAddingFile, setIsAddingFile] = useState(false);
   const [targetFolderId, setTargetFolderId] = useState(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFileTitle, setNewFileTitle] = useState("");
@@ -5175,7 +5177,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
     loadFolderData();
     return () => { cancelled = true; };
-  }, [storageKey, config]);
+  }, [storageKey]);
 
   const saveFolderData = async (newData) => {
     if (!storageKey) return;
@@ -5219,10 +5221,19 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const addFolder = async () => {
     if (!newFolderName.trim()) return;
+    setIsAddingFolder(true);
     const newData = [...folderData, { id: createItemId("folder"), type: "folder", name: newFolderName.trim(), children: [] }];
-    await saveFolderData(newData);
-    setNewFolderName("");
-    setShowAddFolderModal(false);
+    try {
+      setFolderData(newData);
+      await saveFolderData(newData);
+      setNewFolderName("");
+      setShowAddFolderModal(false);
+    } catch (error) {
+      console.error("Failed to add folder:", error);
+      throw error;
+    } finally {
+      setIsAddingFolder(false);
+    }
   };
 
   const resetFileModal = () => {
@@ -5235,6 +5246,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
   const addFile = async () => {
     if (!newFileTitle.trim() || !newFileUrl.trim()) return;
+    setIsAddingFile(true);
     const newItem = {
       id: createItemId("file"),
       title: newFileTitle.trim(),
@@ -5248,12 +5260,21 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
       ? insertItemIntoTree(folderData, targetFolderId, newItem)
       : [...folderData, newItem];
 
-    await saveFolderData(newData);
-    resetFileModal();
+    try {
+      setFolderData(newData);
+      await saveFolderData(newData);
+      resetFileModal();
+    } catch (error) {
+      console.error("Failed to add file:", error);
+      throw error;
+    } finally {
+      setIsAddingFile(false);
+    }
   };
 
   const deleteItem = async (itemId) => {
     const newData = removeItemFromTree(folderData, itemId);
+    setFolderData(newData);
     await saveFolderData(newData);
   };
 
@@ -5384,7 +5405,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
           <Modal open={showAddFolderModal} title="إنشاء مجلد جديد" onClose={() => { setShowAddFolderModal(false); setNewFolderName(""); }} footer={(
             <>
               <button onClick={() => { setShowAddFolderModal(false); setNewFolderName(""); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
-              <button onClick={addFolder} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إنشاء</button>
+              <button onClick={addFolder} disabled={isAddingFolder} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isAddingFolder ? "not-allowed" : "pointer" }}>إنشاء</button>
             </>
           )}>
             <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
@@ -5393,7 +5414,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
           <Modal open={showAddFileModal} title="إضافة ملف جديد" onClose={resetFileModal} footer={(
             <>
               <button onClick={resetFileModal} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
-              <button onClick={addFile} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+              <button onClick={addFile} disabled={isAddingFile} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isAddingFile ? "not-allowed" : "pointer" }}>حفظ</button>
             </>
           )}>
             <input value={newFileTitle} onChange={e => setNewFileTitle(e.target.value)} placeholder="اسم الملف" style={inp} />
