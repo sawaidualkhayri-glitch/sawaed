@@ -537,6 +537,67 @@ async function fbDelete(collection, docId) {
   }
 }
 
+async function fbQuery(collection, structuredQuery) {
+  if (!hasFirestoreBackend()) return null;
+  try {
+    const url = `${FB_BASE}:runQuery`;
+    const headers = { "Content-Type": "application/json", ...(await getFirestoreAuthHeaders()) };
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: collection }],
+        ...structuredQuery,
+      },
+    };
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("fbQuery failed", { collection, status: res.status, statusText: res.statusText, body: text });
+      return null;
+    }
+    const result = await res.json();
+    return result
+      .filter(row => row.document)
+      .map(row => ({ id: row.document.name.split("/").pop(), ...parseFirestoreDoc(row.document) }));
+  } catch (err) {
+    console.error("fbQuery exception", { collection, error: err });
+    return null;
+  }
+}
+
+async function getNews() {
+  const docs = await fbQuery("news", {
+    orderBy: [{ field: { fieldPath: "createdAt" }, direction: "DESCENDING" }],
+  });
+  return docs ? docs.map(normalizeNewsItem) : [];
+}
+
+async function addNewsItem(fields) {
+  const createdAt = Date.now();
+  const id = await fbAdd("news", { ...fields, createdAt });
+  return id ? { id, ...fields, createdAt } : null;
+}
+
+async function deleteNewsItem(id) {
+  return fbDelete("news", id);
+}
+
+function normalizeNewsItem(item) {
+  if (!item) return item;
+  const normalized = { ...item };
+  if (normalized.link && !normalized.url) normalized.url = normalized.link;
+  if (normalized.url && !normalized.link) normalized.link = normalized.url;
+  if (!normalized.createdAt && normalized.date) {
+    normalized.createdAt = typeof normalized.date === "number" ? normalized.date : Date.parse(normalized.date) || Date.now();
+  }
+  return normalized;
+}
+
+function formatNewsDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return date.toLocaleDateString("ar", { day: "numeric", month: "long", year: "numeric" });
+}
+
 function parseFirestoreDoc(doc) {
   if (!doc || !doc.fields) return {};
   const result = {};
@@ -556,6 +617,7 @@ function parseFirestoreValue(v) {
   if (v.integerValue !== undefined) return parseInt(v.integerValue);
   if (v.doubleValue !== undefined) return parseFloat(v.doubleValue);
   if (v.booleanValue !== undefined) return v.booleanValue;
+  if (v.timestampValue !== undefined) return Date.parse(v.timestampValue);
   if (v.arrayValue !== undefined) return (v.arrayValue.values || []).map(parseFirestoreValue);
   if (v.mapValue !== undefined) return parseFirestoreDoc(v.mapValue);
   if (v.nullValue !== undefined) return null;
@@ -565,17 +627,21 @@ function parseFirestoreValue(v) {
 function toFirestoreFields(obj) {
   const fields = {};
   for (const [k, v] of Object.entries(obj)) {
-    fields[k] = toFirestoreValue(v);
+    fields[k] = toFirestoreValue(v, k);
   }
   return fields;
 }
 
-function toFirestoreValue(v) {
+function toFirestoreValue(v, key = "") {
   if (v === null || v === undefined) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === "number" && typeof key === "string" && key.toLowerCase().endsWith("at")) {
+    return { timestampValue: new Date(v).toISOString() };
+  }
   if (typeof v === "string") return { stringValue: v };
   if (typeof v === "boolean") return { booleanValue: v };
   if (typeof v === "number") return Number.isInteger(v) ? { integerValue: v } : { doubleValue: v };
-  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFirestoreValue) } };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map((item) => toFirestoreValue(item, key)) } };
   if (typeof v === "object") return { mapValue: { fields: toFirestoreFields(v) } };
   return { stringValue: String(v) };
 }
@@ -2898,10 +2964,21 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
 
 function NewsPage({ config, saveConfig, T, currentUser, updateUser, onDetail }) {
   const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
   const pinnedByAdmin = config.pinnedNews ? (typeof config.pinnedNews === "string" ? JSON.parse(config.pinnedNews) : config.pinnedNews) : [];
 
   useEffect(() => {
-    fbGet("news").then(data => { if (data) setNews(data.sort((a, b) => b.createdAt - a.createdAt)); });
+    let isMounted = true;
+    setLoading(true);
+    getNews().then(data => {
+      if (!isMounted) return;
+      setNews(data);
+      setLoading(false);
+    }).catch(err => {
+      console.error("Failed to load news:", err);
+      if (isMounted) setLoading(false);
+    });
+    return () => { isMounted = false; };
   }, []);
 
   const togglePin = async (newsId) => {
@@ -2933,10 +3010,20 @@ function NewsPage({ config, saveConfig, T, currentUser, updateUser, onDetail }) 
   return (
     <div style={{ padding: "20px 16px", fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
       <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 16px" }}>📰 الأخبار والمستجدات</h2>
-      {news.length === 0 && <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>لا توجد أخبار بعد</p></div>}
-      {adminPinned.map(n => <Card key={n.id} n={n} pinned={true} />)}
-      {userPinned.map(n => <Card key={n.id} n={n} pinned={true} />)}
-      {regular.map(n => <Card key={n.id} n={n} pinned={false} />)}
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "40px" }}>
+          <div style={{ fontSize: "24px" }}>⏳</div>
+          <p style={{ color: T.subtext }}>جاري تحميل الأخبار...</p>
+        </div>
+      ) : news.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>لا توجد أخبار بعد</p></div>
+      ) : (
+        <>
+          {adminPinned.map(n => <Card key={n.id} n={n} pinned={true} />)}
+          {userPinned.map(n => <Card key={n.id} n={n} pinned={true} />)}
+          {regular.map(n => <Card key={n.id} n={n} pinned={false} />)}
+        </>
+      )}
     </div>
   );
 }
@@ -4630,97 +4717,96 @@ function AdminNews({ config, saveConfig, T, onBack }) {
     const raw = config.pinnedNews; 
     return raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []; 
   }); 
-  const [form, setForm] = useState({ title: "", content: "", source: "", date: new Date().toLocaleDateString("ar"), url: "" }); 
-  const [saving, setSaving] = useState(false); 
+  const [form, setForm] = useState({ title: "", content: "", source: "", link: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => { 
+  useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    fbGet("news").then(d => { 
+    getNews().then(d => {
       if (!isMounted) return;
-      if (d) setNews(d.sort((a, b) => b.createdAt - a.createdAt)); 
+      setNews(d);
       setLoading(false);
-    }).catch(() => {
+    }).catch(err => {
+      console.error("Failed to load news:", err);
       if (isMounted) setLoading(false);
     });
     return () => { isMounted = false; };
   }, []);
 
-  // دالة النشر المحدثة لحل مشكلة تعليق السيرفر الوهمي "فش نت"
-  const addNews = async () => { 
-    if (!form.title) return; 
-    setSaving(true); 
-    
-    let id = null;
-    try {
-      // المحاولة الأولى للنشر
-      id = await fbAdd("news", { ...form, createdAt: Date.now() }); 
-      
-      // محاولة ثانية ذكية في خلفية التطبيق إذا تعطلت الاستجابة الأولى والإنترنت مستقر
-      if (!id && navigator.onLine) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // انتظر ثانية واحدة
-        id = await fbAdd("news", { ...form, createdAt: Date.now() });
-      }
-    } catch (error) {
-      console.error("خطأ أثناء النشر:", error);
+  const addNews = async () => {
+    if (!form.title.trim() || !form.content.trim()) return;
+    setSaving(true);
+    setError("");
+
+    const payload = {
+      title: form.title.trim(),
+      content: form.content.trim(),
+      source: form.source.trim(),
+      link: form.link.trim(),
+    };
+
+    const item = await addNewsItem(payload);
+    if (item) {
+      setNews(n => [normalizeNewsItem(item), ...n]);
+      setForm({ title: "", content: "", source: "", link: "" });
+    } else {
+      setError("تعذّر نشر الخبر. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.");
     }
+    setSaving(false);
+  };
 
-    if (id) { 
-      setNews(n => [{ id, ...form, createdAt: Date.now() }, ...n]); 
-      if (typeof sendLocalNotification === "function") { 
-        sendLocalNotification("📰 خبر جديد — سواعد الخير", form.title); 
-      } 
-      setForm({ title: "", content: "", source: "", date: new Date().toLocaleDateString("ar"), url: "" }); 
-    } else { 
-      alert("⚠️ تعذّر نشر الخبر. يرجى إعادة الضغط على الزر مجدداً لإعادة المحاولة فوراً."); 
-    } 
-    setSaving(false); 
-  }; 
-
-  const deleteNews = async (id) => { 
-    await fbDelete("news", id); 
-    setNews(n => n.filter(x => x.id !== id)); 
-  }; 
-
-  const togglePin = async (id) => { 
-    const pins = pinnedIds.includes(id) ? pinnedIds.filter(x => x !== id) : [...pinnedIds, id]; 
-    setPinnedIds(pins); 
-    await saveConfig({ ...config, pinnedNews: JSON.stringify(pins) }); 
+  const deleteNews = async (id) => {
+    const success = await deleteNewsItem(id);
+    if (success) {
+      setNews(n => n.filter(x => x.id !== id));
+    } else {
+      alert("⚠️ تعذّر حذف الخبر. حاول مرة أخرى.");
+    }
   }; 
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" }; 
   
   return ( 
     <AdminSection title="الأخبار" icon="📰" T={T} onBack={onBack} onSave={() => {}}> 
-      <div style={{ background: T.sectionBg, borderRadius: "14px", padding: "12px", marginBottom: "14px" }}> 
-        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="عنوان الخبر *" style={inp} /> 
-        <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} placeholder="محتوى الخبر..." style={{ ...inp, height: "80px", resize: "vertical" }} /> 
-        <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="المصدر" style={inp} /> 
-        <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="رابط الخبر (اختياري)" style={inp} /> 
-        <button onClick={addNews} disabled={saving || !form.title} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}> 
-          {saving ? "⏳..." : "📢 نشر الخبر"} 
-        </button> 
-      </div> 
-      {loading ? ( 
-        <div style={{ textAlign: "center", padding: "40px" }}> 
-          <div style={{ fontSize: "24px" }}>⏳</div> 
-          <p style={{ color: T.subtext }}>جاري تحميل الأخبار...</p> 
-        </div> 
-      ) : news.length === 0 ? ( 
-        <div style={{ textAlign: "center", padding: "40px" }}> 
-          <div style={{ fontSize: "48px" }}>📭</div> 
-          <p style={{ color: T.subtext }}>لا توجد أخبار بعد</p> 
-        </div> 
-      ) : news.map(n => ( 
-        <div key={n.id} style={{ background: T.card, border: `1px solid ${pinnedIds.includes(n.id) ? T.accent + "66" : T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", display: "flex", gap: "10px", alignItems: "center" }}> 
-          <div style={{ flex: 1 }}> 
-            <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "13px" }}>{n.title}</p> 
-            <p style={{ margin: 0, color: T.subtext, fontSize: "11px" }}>{n.source} --- {n.date}</p> 
-          </div> 
-          <button onClick={() => togglePin(n.id)} style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer" }}>{pinnedIds.includes(n.id) ? "📌" : "📍"}</button> 
-          <button onClick={() => deleteNews(n.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>🗑️</button> 
-        </div> 
-      ))} 
+      <div style={{ background: T.sectionBg, borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
+        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="عنوان الخبر *" style={inp} />
+        <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} placeholder="محتوى الخبر..." style={{ ...inp, height: "100px", resize: "vertical" }} />
+        <input value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} placeholder="المصدر" style={inp} />
+        <input value={form.link} onChange={e => setForm(f => ({ ...f, link: e.target.value }))} placeholder="رابط الخبر (اختياري)" style={inp} />
+        <button onClick={addNews} disabled={saving || !form.title.trim() || !form.content.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: saving ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+          {saving ? "⏳ جاري النشر..." : "📢 نشر الخبر"}
+        </button>
+        {error ? <p style={{ color: "#f88", margin: "10px 0 0", fontSize: "13px" }}>{error}</p> : null}
+      </div>
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "40px" }}>
+          <div style={{ fontSize: "24px" }}>⏳</div>
+          <p style={{ color: T.subtext }}>جاري تحميل الأخبار...</p>
+        </div>
+      ) : news.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px" }}>
+          <div style={{ fontSize: "48px" }}>📭</div>
+          <p style={{ color: T.subtext }}>لا توجد أخبار بعد</p>
+        </div>
+      ) : news.map(n => (
+        <div key={n.id} style={{ background: T.card, border: `1px solid ${pinnedIds.includes(n.id) ? T.accent + "66" : T.cardBorder}`, borderRadius: "14px", padding: "14px", marginBottom: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: "0 0 6px", fontWeight: "700", color: T.text, fontSize: "15px" }}>{n.title}</p>
+              <p style={{ margin: "0 4px 8px", color: T.subtext, fontSize: "12px" }}>{n.source || "بدون مصدر"} · {formatNewsDate(n.createdAt)}</p>
+              <p style={{ margin: 0, color: T.text, fontSize: "14px", lineHeight: "1.75" }}>{n.content}</p>
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "flex-start", marginTop: "4px" }}>
+              {n.link ? (
+                <a href={n.link} target="_blank" rel="noreferrer" style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", borderRadius: "10px", padding: "8px 12px", textDecoration: "none", fontSize: "13px" }}>فتح الرابط</a>
+              ) : null}
+              <button onClick={() => deleteNews(n.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "10px", padding: "8px 12px", cursor: "pointer", fontSize: "13px" }}>حذف</button>
+            </div>
+          </div>
+        </div>
+      ))}
     </AdminSection> 
   ); 
 }
