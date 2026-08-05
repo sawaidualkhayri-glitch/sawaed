@@ -1261,6 +1261,8 @@ export default function App() {
     if (currentUser) {
       const { streak } = calcFlame();
       setFlame(streak);
+      // If the user is currently viewing a subject/folder/found/news, avoid auto-navigation
+      if (subjectNav || folderNav || foundNav || newsDetail) return;
       if (shouldForceOnboarding) {
         setPage("onboarding");
       } else if (isAdminLike) {
@@ -1276,7 +1278,7 @@ export default function App() {
       setFoundNav(null);
       setNewsDetail(null);
     }
-  }, [configLoaded, authLoading, currentUser, config.splashEnabled, authNeedsOnboarding, isAdminLike]);
+  }, [configLoaded, authLoading, currentUser, config.splashEnabled, authNeedsOnboarding, isAdminLike, subjectNav, folderNav, foundNav, newsDetail]);
 
   useEffect(() => {
     if (config.motivationalFixed || !config.motivationalQuotes?.length) return;
@@ -1678,14 +1680,7 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
   // حساب النسبة المئوية هنا بدقة
   const pct = total ? Math.round((done / total) * 100) : 0;
 
-  // 👇 شرط إطلاق المفرقعات الاحتفالية عند وصول الإنجاز إلى 100%
-  if (pct === 100 && total > 0) {
-    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-    setTimeout(() => {
-      confetti({ particleCount: 50, angle: 60, spread: 55, origin: { x: 0 } });
-      confetti({ particleCount: 50, angle: 120, spread: 55, origin: { x: 1 } });
-    }, 250);
-  }
+  // Removed confetti side-effects from render-time. Celebrations occur in SubjectPage only.
 
   return { pct, done, total };
 };
@@ -2153,13 +2148,35 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
 
   const subjectKey = getSubjectKey();
 
-  const lessonsKey = `lessons_${subjectKey}_${sub}`;
-  const lessonsRaw = config[lessonsKey];
-  const lessons = lessonsRaw ? (typeof lessonsRaw === "string" ? JSON.parse(lessonsRaw) : lessonsRaw) : [];
+  // Resolve lessons key using multiple fallbacks to match AdminLessons saving patterns
+  const gb = `${canonicalGrade}_${canonicalBranch}`;
+  const semLabel = selectedSemester;
+  const semNumeric = semLabel === "فصل أول" ? "1" : semLabel === "فصل ثان" ? "2" : semLabel;
+  const candidateKeys = [
+    `lessons_${subjectKey}_${sub}`,
+    `lessons_${canonicalGrade}_${canonicalBranch}_${selectedSemester}_${sub}`,
+    `lessons_${gb}_sem${semLabel}_${sub}`,
+    `lessons_${gb}_sem${semNumeric}_${sub}`,
+    `lessons_${gb}_${sub}`,
+  ];
+
+  let lessons = [];
+  for (const k of candidateKeys) {
+    const raw = config[k];
+    if (raw && ((typeof raw === "string" && raw.trim() !== "") || Array.isArray(raw))) {
+      try {
+        lessons = typeof raw === "string" ? JSON.parse(raw) : raw;
+        break;
+      } catch (e) {
+        console.warn(`Failed to parse lessons at key ${k}:`, e);
+      }
+    }
+  }
   const doneLessons = currentUser?.progress?.[`${subjectKey}_${sub}`] || [];
   const done = doneLessons.length;
   const total = lessons.length;
   const pct = total ? Math.round((done / total) * 100) : 0;
+  const [celebrated, setCelebrated] = useState(false);
   const [showLessons, setShowLessons] = useState(false);
 
   const sections = config.subjectSections || [];
@@ -2170,6 +2187,18 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
     if (idx >= 0) arr.splice(idx, 1); else arr.push(l);
     await updateUser({ progress: { ...currentUser.progress, [`${subjectKey}_${sub}`]: arr } });
   };
+
+  useEffect(() => {
+    if (total > 0 && pct === 100 && !celebrated) {
+      setCelebrated(true);
+      confetti({ particleCount: 120, spread: 90, origin: { y: 0.45 } });
+      confetti({ particleCount: 80, angle: 60, spread: 70, origin: { x: 0.2, y: 0.4 } });
+      confetti({ particleCount: 80, angle: 120, spread: 70, origin: { x: 0.8, y: 0.4 } });
+    }
+    if (pct < 100 && celebrated) {
+      setCelebrated(false);
+    }
+  }, [pct, total, celebrated]);
 
   if (isGrade11 && !selectedSemester) {
     return (
@@ -2215,7 +2244,7 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
           </div>
         )}
 
-        <div onClick={() => setShowLessons(!showLessons)} style={{ marginTop: "14px", background: T.sectionBg, borderRadius: "12px", padding: "12px", cursor: "pointer", border: `1px solid ${T.cardBorder}` }}>
+        <div onClick={() => setShowLessons(prev => !prev)} style={{ marginTop: "14px", background: T.sectionBg, borderRadius: "12px", padding: "12px", cursor: "pointer", border: `1px solid ${T.cardBorder}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
             <span style={{ fontSize: "13px", color: T.text, fontWeight: "600" }}>معدّل الإنجاز</span>
             <span style={{ fontSize: "14px", fontWeight: "800", color: config.progressBarColor || T.accent }}>{pct}%</span>
@@ -2224,19 +2253,19 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
             <div style={{ height: "100%", width: `${pct}%`, background: config.progressBarColor || T.accent, borderRadius: "6px" }} />
           </div>
           <p style={{ margin: "6px 0 0", fontSize: "11px", color: T.subtext }}>{done}/{total} درس ✓ اضغط لعرض الدروس</p>
-        </div>
 
-        {showLessons && (
-          <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
-            {lessons.length === 0 && <p style={{ color: T.subtext, fontSize: "13px", textAlign: "center" }}>لا يوجد دروس</p>}
-            {lessons.map(l => (
-              <label key={l} style={{ display: "flex", alignItems: "center", gap: "10px", background: T.inputBg, borderRadius: "10px", padding: "10px 12px", cursor: "pointer" }}>
-                <input type="checkbox" checked={doneLessons.includes(l)} onChange={() => toggleLesson(l)} style={{ accentColor: T.accent, width: "16px", height: "16px" }} />
-                <span style={{ fontSize: "13px", color: doneLessons.includes(l) ? T.subtext : T.text, textDecoration: doneLessons.includes(l) ? "line-through" : "none" }}>{l}</span>
-              </label>
-            ))}
-          </div>
-        )}
+          {showLessons && (
+            <div onClick={e => e.stopPropagation()} style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              {lessons.length === 0 && <p style={{ color: T.subtext, fontSize: "13px", textAlign: "center" }}>لا يوجد دروس</p>}
+              {lessons.map(l => (
+                <label key={l} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", background: T.inputBg, borderRadius: "12px", padding: "12px 16px", cursor: "pointer", border: `1px solid ${doneLessons.includes(l) ? T.accent : T.cardBorder}`, direction: "ltr", width: "100%", boxSizing: "border-box", overflow: "hidden" }}>
+                  <input type="checkbox" checked={doneLessons.includes(l)} onChange={(e) => { e.stopPropagation(); toggleLesson(l); }} style={{ accentColor: T.accent, width: "18px", height: "18px", flex: "0 0 auto", marginLeft: 0 }} />
+                  <span style={{ fontSize: "14px", color: doneLessons.includes(l) ? "gray" : T.text, textDecoration: doneLessons.includes(l) ? "line-through" : "none", opacity: doneLessons.includes(l) ? 0.65 : 1, textAlign: "right", flex: "1 1 auto" }}>{l}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
@@ -3967,10 +3996,11 @@ function AdminSplash({ config, saveConfig, T, onBack }) {
 function AdminGrades({ config, saveConfig, T, onBack }) {
   const [grades, setGrades] = useState([...config.grades]);
   const [branches, setBranches] = useState([...config.branches]);
-  const [ng, setNg] = useState("");
+  const [selSemester, setSelSemester] = useState("فصل أول"); // إضافة حالة اختيار الفصل
   const [nb, setNb] = useState("");
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "14px", color: T.text, flex: 1, outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl" };
+  const [ng, setNg] = useState("");
 
   return (
     <AdminSection title="الصفوف والفروع" icon="🏫" T={T} onBack={onBack} onSave={() => saveConfig({ ...config, grades, branches })}>
@@ -4559,13 +4589,9 @@ function AdminSubjects({ config, saveConfig, T, onBack }) {
 function AdminLessons({ config, saveConfig, T, onBack }) {
   const keys = (config.grades || []).flatMap(g => (config.branches || []).map(b => `${g}_${b}`));
   const [selGB, setSelGB] = useState(keys[0] || "");
-  const [selSemester, setSelSemester] = useState("1"); // إضافة حالة اختيار الفصل
+  const [selSemester, setSelSemester] = useState("فصل أول"); // إضافة حالة اختيار الفصل
   
-  // المفتاح المركب لقراءة المواد الصحيحة المفصولة بالفصل الدراسي
-  const subjectsKey = `${selGB}_sem${selSemester}`;
-  const currentAvailableSubjects = getSubjectNames(config.subjects?.[subjectsKey] || [], true);
-
-  const [selSub, setSelSub] = useState(currentAvailableSubjects[0] || "");
+  const [selSub, setSelSub] = useState("");
   const [color, setColor] = useState(config.progressBarColor || "#6C63FF");
   
   // تعديل مفتاح حفظ الدروس ليشمل الفصل الدراسي لمنع تداخل الدروس نهائياً
@@ -4574,10 +4600,12 @@ function AdminLessons({ config, saveConfig, T, onBack }) {
   const [lessons, setLessons] = useState([]);
   const [newL, setNewL] = useState("");
 
-  // تحديث المادة المختارة تلقائياً عند تغيير الصف أو الفصل الدراسي
+  const [selectedGrade, selectedBranch] = selGB.split("_");
+  const currentAvailableSubjects = getSubjectsByGradeBranch(config.subjects, selectedGrade, selectedBranch, true);
+
   useEffect(() => {
-    setSelSub(getSubjectNames(config.subjects?.[subjectsKey] || [], true)[0] || "");
-  }, [selGB, selSemester, config.subjects]);
+    setSelSub(currentAvailableSubjects[0] || "");
+  }, [selGB, config.subjects, currentAvailableSubjects.length]);
 
   useEffect(() => {
     const raw = config[lKey];
@@ -4617,8 +4645,8 @@ function AdminLessons({ config, saveConfig, T, onBack }) {
       {/* 2. إضافة قائمة تحديد الفصل الدراسي للدروس */}
       <label style={{ fontSize: "12px", color: T.subtext, display: "block", marginBottom: "2px" }}>اختر الفصل الدراسي:</label>
       <select value={selSemester} onChange={e => setSelSemester(e.target.value)} style={sel}>
-        <option value="1">الفصل الدراسي الأول</option>
-        <option value="2">الفصل الدراسي الثاني</option>
+          <option value="فصل أول">الفصل الدراسي الأول</option>
+          <option value="فصل ثان">الفصل الدراسي الثاني</option>
       </select>
 
       {/* 3. اختيار المادة (تظهر هنا المواد التابعة للفصل المختار فقط) */}
