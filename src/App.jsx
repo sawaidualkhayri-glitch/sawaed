@@ -1256,16 +1256,27 @@ export default function App() {
     });
   }, []);
 
+  const prevUserRef = useRef(null);
+
   useEffect(() => {
     if (!configLoaded || authLoading) return;
+    const prev = prevUserRef.current;
+    const significantChange = !prev || prev.uid !== currentUser?.uid || prev.role !== currentUser?.role || prev.grade !== currentUser?.grade || prev.branch !== currentUser?.branch;
+
     if (currentUser) {
       const { streak } = calcFlame();
       setFlame(streak);
-      // If the user is currently viewing a subject/folder/found/news, avoid auto-navigation
-      if (subjectNav || folderNav || foundNav || newsDetail) return;
+
+      // If this update only contains non-significant fields (e.g., progress), don't auto-navigate
+      if (!significantChange) {
+        prevUserRef.current = currentUser;
+        return;
+      }
+
       if (shouldForceOnboarding) {
         setPage("onboarding");
       } else if (isAdminLike) {
+        // Only auto-enter admin on a significant user change (role change or initial load)
         setPage("admin");
       } else {
         setPage("main");
@@ -1278,7 +1289,9 @@ export default function App() {
       setFoundNav(null);
       setNewsDetail(null);
     }
-  }, [configLoaded, authLoading, currentUser, config.splashEnabled, authNeedsOnboarding, isAdminLike, subjectNav, folderNav, foundNav, newsDetail]);
+
+    prevUserRef.current = currentUser;
+  }, [configLoaded, authLoading, currentUser, config.splashEnabled, authNeedsOnboarding, isAdminLike]);
 
   useEffect(() => {
     if (config.motivationalFixed || !config.motivationalQuotes?.length) return;
@@ -1324,7 +1337,7 @@ export default function App() {
 
   if (page === "admin") return <AdminPanel config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} editorRole={role} editorPermissions={null} onBack={() => { setPage(currentUser ? "main" : "register"); popNav(); }} />;
   if (folderNav) return <FolderPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} data={folderNav} onBack={() => { setFolderNav(null); popNav(); }} isEditorSession={false} editorRole={null} editorPermissions={null} />;
-  if (subjectNav) return <SubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} subject={subjectNav} onBack={() => { setSubjectNav(null); popNav(); }} isEditorSession={false} editorRole={null} onOpenFolder={openFolder} />;
+  if (subjectNav) return <SubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} currentUser={currentUser} updateUser={updateUser} subject={subjectNav} onBack={() => { setSubjectNav(null); setPage(currentUser ? "main" : "register"); setActivePage("home"); }} isEditorSession={false} editorRole={null} onOpenFolder={openFolder} />;
   if (foundNav) return <FoundationSubjectPage config={config} saveConfig={saveConfig} T={T} darkMode={darkMode} data={foundNav} onBack={() => { setFoundNav(null); popNav(); }} />;
   if (newsDetail) return <NewsDetailPage T={T} news={newsDetail} currentUser={currentUser} updateUser={updateUser} onBack={() => { setNewsDetail(null); popNav(); }} />;
 
