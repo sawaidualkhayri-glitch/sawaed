@@ -3,7 +3,6 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassw
 import { collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
-const MASTER_ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
 import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMalazem, canManageTaasees, canManageNews } from "./AuthContext.jsx";
 import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded } from "./firebaseAuth";
 import { db, getEditorProvisioningAuth, firebaseConfig, auth } from "./firebase";
@@ -995,8 +994,7 @@ export default function App() {
   const [page, setPage] = useState("loading");
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
-  const rawRole = (currentUser?.role || "user").toString().trim().toLowerCase();
-  const isFullAdmin = role === "super_admin" || rawRole === "admin" || auth?.currentUser?.uid === MASTER_ADMIN_UID;
+  const isFullAdmin = role === "super_admin";
   const isAdminLike = isFullAdmin || ["editor_full", "editor_malazem", "editor_news", "editor_taasees"].includes(role);
   const [activePage, setActivePage] = useState("home");
   const [quoteIdx, setQuoteIdx] = useState(0);
@@ -2444,7 +2442,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   const isEditor = isEditorSession;
   // محرر كامل / مسؤول (admin) لهما صلاحية كاملة على كل شيء، ومحرر "الملازم" له صلاحية إدارة الملفات والمجلدات فقط
   // كما تُحترم الصلاحيات المخصّصة (custom permissions) التي يضبطها المسؤول لكل محرر على حدة
-  const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem" || auth?.currentUser?.uid === MASTER_ADMIN_UID);
+  const canEditStructure = isEditor && (role === "super_admin" || role === "editor_full" || role === "editor_malazem");
 
   const saveFolderData = async (newData) => {
     const normalizedKey = storageKey;
@@ -3720,7 +3718,7 @@ function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermiss
   const isSectionAllowed = (id) => {
     const sectionDefinition = allAdminSections.find(s => s.id === id);
     if (!sectionDefinition) return false;
-    return sectionDefinition.isAllowed(role) || auth?.currentUser?.uid === MASTER_ADMIN_UID;
+    return sectionDefinition.isAllowed(role);
   };
   const adminSections = (allAdminSections || []).filter(s => isSectionAllowed(s.id));
   const mainMenuSections = (adminSections || []).filter((sectionItem) => !!sectionItem);
@@ -3882,7 +3880,7 @@ function AdminPassword({ config, saveConfig, T, onBack, role }) {
   const [step, setStep] = useState(1);
   const [sending, setSending] = useState(false);
 
-  if (role !== "super_admin" && auth?.currentUser?.uid !== MASTER_ADMIN_UID) {
+  if (role !== "super_admin") {
     return (
       <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
         <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -4040,7 +4038,7 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [usernamesLoaded, setUsernamesLoaded] = useState(false);
   const { currentUser: localCurrentUser, authLoading: localAuthLoading } = useAuth();
-  const isAdminSession = role === "super_admin" || role === "admin" || localCurrentUser?.uid === MASTER_ADMIN_UID || (localCurrentUser?.email || "").toLowerCase() === "nadahindi301@gmail.com";
+  const isAdminSession = ["super_admin", "admin"].includes(role);
 
   useEffect(() => {
     if (typeof localAuthLoading !== "undefined" && localAuthLoading) return;
@@ -4050,7 +4048,7 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
       }
       return;
     }
-    if (!["super_admin","admin"].includes(role) && localCurrentUser?.uid !== MASTER_ADMIN_UID) return;
+    if (!["super_admin","admin"].includes(role)) return;
 
     const editorRoles = ["super_admin", "admin", "editor_full", "editor_malazem", "editor_taasees", "editor_news"];
     let usernamesData = [];
@@ -4124,7 +4122,7 @@ function AdminEditors({ config, saveConfig, T, onBack, role }) {
     };
   }, [role, localAuthLoading, localCurrentUser]);
 
-  if (role !== "super_admin" && localCurrentUser?.uid !== MASTER_ADMIN_UID) {
+  if (role !== "super_admin") {
     return (
       <div className="app-shell" style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl" }}>
         <div style={{ background: T.card, backdropFilter: "blur(16px)", borderBottom: `1px solid ${T.cardBorder}`, padding: "16px", display: "flex", alignItems: "center", gap: "12px" }}>
@@ -4804,9 +4802,6 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   );
 }
 
-// ============================================================
-// ADMIN ANNOUNCEMENTS — إشعارات فورية مستقلة عن الأخبار (محرر 1، محرر 5، ومسؤول Nadosh فقط)
-// ============================================================
 function AdminAnnouncements({ config, saveConfig, T, onBack }) {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ title: "", body: "" });

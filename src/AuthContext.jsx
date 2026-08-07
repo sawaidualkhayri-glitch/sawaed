@@ -8,7 +8,6 @@ import { cacheJson, clearCachedJson, getCachedJson } from "./offlineHandler";
 import { ALL_EDITOR_ROLES } from "./constants";
 
 const AuthContext = createContext(null);
-const MASTER_ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
 
 export function normalizeUserRole(role) {
   const normalized = (role || "").trim();
@@ -108,11 +107,6 @@ export function AuthProvider({ children }) {
 
   const applyUserProfile = useCallback((profile, incomingFirebaseUser = null) => {
     const safeUser = buildUserProfile(incomingFirebaseUser || { uid: profile?.uid || profile?.id || "", email: profile?.email || "", displayName: profile?.displayName || profile?.fullName || "" }, profile || {});
-    // Force master UID to always be super_admin in client state
-    if (safeUser?.uid === MASTER_ADMIN_UID) {
-      safeUser.role = "super_admin";
-      safeUser.isAdmin = true;
-    }
     setCurrentUser(safeUser);
     setNeedsOnboarding(shouldRequireOnboarding(safeUser, safeUser.role));
     try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch (error) { console.warn("Failed to cache user locally:", error); }
@@ -247,10 +241,6 @@ export function AuthProvider({ children }) {
         }
 
         let safeUser = buildUserProfile(user, profile);
-        if (safeUser?.uid === MASTER_ADMIN_UID) {
-          safeUser.role = "super_admin";
-          safeUser.isAdmin = true;
-        }
         setCurrentUser(safeUser);
         setNeedsOnboarding(shouldRequireOnboarding(safeUser, safeUser.role));
         try { localStorage.setItem("sawaed_user", JSON.stringify(safeUser)); } catch (error) { console.warn("Failed to cache user locally:", error); }

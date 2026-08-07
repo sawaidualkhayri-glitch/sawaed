@@ -10,15 +10,9 @@ import {
 import { auth, db, getEditorProvisioningAuth } from "./firebase";
 import { collection, doc, getDoc, getDocs, setDoc, deleteDoc, serverTimestamp, query, where, documentId, limit } from "firebase/firestore";
 
-const ADMIN_UID = "7gW0ECprv2YHPi6sHTQpmVnLbaC3";
-const ADMIN_EMAIL = "nadahindi301@gmail.com";
-
 async function isCurrentUserSuperAdmin() {
-  if (auth.currentUser?.uid === ADMIN_UID) return true;
   const current = auth.currentUser;
   if (!current) return false;
-  const email = (current.email || "").toLowerCase();
-  if (current.uid === ADMIN_UID || email === ADMIN_EMAIL) return true;
 
   try {
     assertFirestoreConfigured();
