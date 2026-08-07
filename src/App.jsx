@@ -940,7 +940,6 @@ const DEFAULT_CONFIG = {
   savedCategories: ["مميز بنجمة"],
   savedTypes: ["ملف من المواد", "روابط من أي مكان", "خبر من الأخبار", "ملفات من التأسيس"],
   contactLinks: [{ label: "تواصل معنا عبر واتساب", url: "https://whatsapp.com/channel/0029VbCYtmCKwqSKQllr5w3p", icon: "💬" }],
-  adminPassword: import.meta.env.VITE_ADMIN_PASSWORD ?? "",
   // ============================================================
   // حسابات المحررين الافتراضية (يمكن للمحرر "admin" فقط إضافة/حذف محررين)
   // ============================================================
@@ -986,7 +985,14 @@ const SEC_EMOJI = { "الرزم": "📦", "الكتب": "📚", "حلول الك
 // ============================================================
 
 export default function App() {
-  const [config, setConfig] = useState(() => ls("sawaed_config", DEFAULT_CONFIG));
+  const [config, setConfig] = useState(() => {
+    const saved = ls("sawaed_config", DEFAULT_CONFIG);
+    if (saved && typeof saved === "object" && "adminPassword" in saved) {
+      const { adminPassword, ...rest } = saved;
+      return rest;
+    }
+    return saved;
+  });
   const [darkMode, setDarkMode] = useState(() => {
     const saved = ls("sawaed_dark", null);
     return saved === null ? true : saved;
@@ -1303,10 +1309,12 @@ export default function App() {
   }, []);
 
   const saveConfig = async (newCfg) => {
-    setConfig(newCfg);
-    lsSet("sawaed_config", newCfg);
+    const cfg = { ...newCfg };
+    delete cfg.adminPassword;
+    setConfig(cfg);
+    lsSet("sawaed_config", cfg);
     const flat = {};
-    for (const [k, v] of Object.entries(newCfg)) {
+    for (const [k, v] of Object.entries(cfg)) {
       flat[k] = typeof v === "object" ? JSON.stringify(v) : v;
     }
     await fbSet("app_config", "main", flat);
@@ -3928,7 +3936,7 @@ function AdminPassword({ config, saveConfig, T, onBack, role }) {
     setErr("");
     if (newPass.length < 4) { setErr("كلمة السر أقل من 4 أحرف"); return; }
     if (newPass !== confirmPass) { setErr("كلمتا السر غير متطابقتين"); return; }
-    await saveConfig({ ...config, adminPassword: newPass });
+    await saveConfig({ ...config });
     await fbDelete("admin_codes", "reset");
     setStep(4);
   };
