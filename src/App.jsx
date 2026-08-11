@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, updatePassword, signOut } from "firebase/auth";
-import { collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { onMessage } from "firebase/messaging";
 import confetti from "canvas-confetti";
 import PDFViewer from "./PDFViewer.jsx";
 import { useAuth, normalizeUserRole, isAnyEditor, canManageEditors, canManageMalazem, canManageTaasees, canManageNews } from "./AuthContext.jsx";
 import { loginWithEmail, signUpWithEmail, loginWithGoogle, loginWithUsername, loginWithIdentifier, ensureEditorAccountsSeeded } from "./firebaseAuth";
-import { db, getEditorProvisioningAuth, firebaseConfig, auth } from "./firebase";
+import { db, getEditorProvisioningAuth, firebaseConfig, auth, messaging, requestFCMToken } from "./firebase";
 import { cloudflareWorkerBaseUrl } from "./config";
 
 // Simple ErrorBoundary to catch rendering errors from react-pdf or other subtrees
@@ -347,8 +348,10 @@ async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"]) {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      const existing = await navigator.serviceWorker.getRegistration("/");
+      const reg = existing || await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
       window.__swReg = reg;
+      console.log("[SW] Root service worker registration ready:", reg?.scope, reg?.active?.scriptURL || reg?.waiting?.scriptURL || reg?.installing?.scriptURL);
       reg.addEventListener("updatefound", () => {
         const nw = reg.installing;
         nw?.addEventListener("statechange", () => {
@@ -460,7 +463,11 @@ async function fbGet(collection, docId) {
     const res = await fetch(url, { headers });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("fbGet failed", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      if (res.status === 403) {
+        console.warn("[Firestore 403] fbGet denied. Check Firestore Security Rules or Google Cloud IAM permissions.", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      } else {
+        console.error("fbGet failed", { collection, docId, status: res.status, statusText: res.statusText, body: text });
+      }
       return null;
     }
     const data = await res.json();
@@ -508,7 +515,11 @@ async function fbAdd(collection, fields) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error("fbAdd failed", { collection, status: res.status, statusText: res.statusText, body: text });
+      if (res.status === 403) {
+        console.warn("[Firestore 403] fbAdd denied. Check Firestore Security Rules or Google Cloud IAM permissions.", { collection, status: res.status, statusText: res.statusText, body: text });
+      } else {
+        console.error("fbAdd failed", { collection, status: res.status, statusText: res.statusText, body: text });
+      }
       return null;
     }
     const data = await res.json();
@@ -998,6 +1009,7 @@ export default function App() {
     return saved === null ? true : saved;
   });
   const [page, setPage] = useState("loading");
+  const [notificationToast, setNotificationToast] = useState(null);
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
   const isFullAdmin = role === "super_admin";
@@ -1152,6 +1164,76 @@ export default function App() {
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !firebaseConfig?.projectId) return;
+    navigator.serviceWorker.register("/firebase-messaging-sw.js").catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser?.uid || !messaging) return;
+    if (Notification.permission !== "granted") return;
+    console.info("Registering FCM token for active user");
+    requestFCMToken().catch((err) => {
+      console.warn("App-level FCM registration failed:", err);
+    });
+  }, [currentUser?.uid]);
+
+  useEffect(() => {
+    if (!messaging) return;
+
+    const unsubscribe = onMessage(messaging, (payload) => {
+      const title = payload?.notification?.title || "إشعار جديد";
+      const body = payload?.notification?.body || "";
+      setNotificationToast({ title, body });
+      if (typeof sendLocalNotification === "function") sendLocalNotification(title, body);
+      const timer = window.setTimeout(() => setNotificationToast(null), 5000);
+      return () => window.clearTimeout(timer);
+    });
+
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!db) return;
+
+    let isFirstSnapshot = true;
+    const lastSeenBroadcastId = ls("sawaed_last_broadcast_id", null);
+    const unsubscribe = onSnapshot(collection(db, "broadcast_notifications"), (snapshot) => {
+      const docs = [...snapshot.docs].sort((a, b) => {
+        const aTime = a.data()?.createdAt?.toDate ? a.data().createdAt.toDate().getTime() : Number(a.data()?.createdAt || 0);
+        const bTime = b.data()?.createdAt?.toDate ? b.data().createdAt.toDate().getTime() : Number(b.data()?.createdAt || 0);
+        return bTime - aTime;
+      });
+
+      const newest = docs[0];
+      if (!newest) return;
+
+      const newestId = newest.id;
+      if (isFirstSnapshot) {
+        isFirstSnapshot = false;
+        if (lastSeenBroadcastId !== newestId) {
+          lsSet("sawaed_last_broadcast_id", newestId);
+        }
+        return;
+      }
+
+      if (lastSeenBroadcastId && newestId === lastSeenBroadcastId) return;
+
+      const payload = newest.data() || {};
+      const title = payload.title || "إشعار جديد";
+      const body = payload.body || "";
+      setNotificationToast({ title, body });
+      lsSet("sawaed_last_broadcast_id", newestId);
+      if (typeof sendLocalNotification === "function") sendLocalNotification(title, body);
+    }, (error) => {
+      console.warn("broadcast_notifications listener failed:", error);
+    });
+
+    return () => unsubscribe && unsubscribe();
   }, []);
 
   // ============================================================
@@ -3531,9 +3613,28 @@ function SettingsPage({ config, T, darkMode, setDarkMode, currentUser, updateUse
   const [notifStatus, setNotifStatus] = useState(Notification.permission || "default");
 
   const requestNotifications = async () => {
-    const perm = await Notification.requestPermission();
-    setNotifStatus(perm);
-    if (perm === "granted") new Notification("سواعد الخير ✅", { body: "تم تفعيل الإشعارات بنجاح!" });
+    console.info("Requesting notification permission from settings UI");
+    try {
+      const perm = await Notification.requestPermission();
+      setNotifStatus(perm);
+
+      if (perm === "granted") {
+        console.info("Notification permission granted; starting FCM token sync");
+        const token = await requestFCMToken();
+        console.info("FCM token registration result:", token ? "success" : "no token");
+
+        if (token) {
+          new Notification("سواعد الخير ✅", { body: "تم تفعيل الإشعارات بنجاح!" });
+        } else {
+          console.warn("FCM token registration returned null. Check SW registration, VAPID key and Firestore rules.");
+        }
+      } else {
+        console.warn("Notification permission denied by browser user:", perm);
+      }
+    } catch (err) {
+      console.error("Notification toggle failed:", err);
+      setNotifStatus(Notification.permission || "default");
+    }
   };
 
   // ─── تذكير المذاكرة المجدول (تاريخ + وقت بالدقيقة) ───
@@ -4812,7 +4913,8 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
 
 function AdminAnnouncements({ config, saveConfig, T, onBack }) {
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ title: "", body: "" });
+  const [notificationTitle, setNotificationTitle] = useState("");
+  const [notificationBody, setNotificationBody] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -4823,21 +4925,96 @@ function AdminAnnouncements({ config, saveConfig, T, onBack }) {
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
 
   const sendAnnouncement = async () => {
-    if (!form.title.trim()) return;
+    const title = notificationTitle.trim();
+    if (!title) return;
     setSending(true);
-    const payload = { title: form.title.trim(), body: form.body.trim(), createdAt: Date.now() };
-    const id = await fbAdd("announcements", payload);
-    if (id) {
-      setItems(list => [{ id, ...payload }, ...list]);
-      lsSet("sawaed_last_announcement_id", id); // حتى لا يستقبل المُرسِل نفسه إشعاراً مكرراً
-      if (typeof sendLocalNotification === "function") sendLocalNotification(`📢 ${payload.title}`, payload.body);
-      setForm({ title: "", body: "" });
+
+    try {
+      const body = notificationBody.trim();
+      const payload = { title, body, createdAt: Date.now() };
+      const id = await fbAdd("announcements", payload);
+
+      let tokens = [];
+      try {
+        const tokenDocs = await fbGet("fcm_tokens");
+        tokens = (Array.isArray(tokenDocs) ? tokenDocs : [])
+          .map(doc => {
+            const raw = typeof doc?.token === "string" ? doc.token : typeof doc?.id === "string" ? doc.id : "";
+            return String(raw ?? "").trim();
+          })
+          .filter(token => typeof token === "string" && token.length > 0 && token !== "undefined");
+
+        const uniqueTokens = Array.from(new Set(tokens));
+        console.log("[FCM Dispatch] Extracted token count:", uniqueTokens.length, "preview:", uniqueTokens.slice(0, 3));
+        tokens = uniqueTokens;
+      } catch (err) {
+        console.warn("[FCM Dispatch] Failed to load FCM tokens for broadcast; continuing without push recipients.", err);
+        tokens = [];
+      }
+
+      if (db) {
+        const sentBy = auth?.currentUser?.email || auth?.currentUser?.uid || "admin";
+        addDoc(collection(db, "broadcast_notifications"), {
+          title,
+          body,
+          createdAt: serverTimestamp(),
+          sentBy,
+        }).then(() => {
+          console.log("[FCM Dispatch] saved broadcast_notifications log entry");
+        }).catch((err) => {
+          console.warn("[FCM Dispatch] broadcast_notifications write failed. Continuing with worker dispatch.", err);
+        });
+      }
+
+      if (tokens.length > 0) {
+        const uniqueTokens = Array.from(new Set(tokens.filter(t => typeof t === "string" && t.trim() !== "")));
+        const workerPayload = {
+          title: title.trim(),
+          body: body.trim(),
+          tokens: uniqueTokens,
+        };
+        console.log("[FCM Dispatch] Sending worker payload:", {
+          title: workerPayload.title,
+          body: workerPayload.body,
+          tokensCount: workerPayload.tokens.length,
+          tokensPreview: workerPayload.tokens.slice(0, 3),
+        });
+        try {
+          const workerRes = await fetch("https://sawaed.hamodemsg.workers.dev/send-notification", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(workerPayload),
+          });
+
+          if (!workerRes.ok) {
+            const workerText = await workerRes.text().catch(() => "");
+            console.warn("[FCM Dispatch] Cloudflare Worker push delivery failed:", workerRes.status, workerText);
+          } else {
+            console.log("[FCM Dispatch] Worker accepted payload with status:", workerRes.status);
+          }
+        } catch (err) {
+          console.warn("[FCM Dispatch] Cloudflare Worker push request failed:", err);
+        }
+      } else {
+        console.warn("[FCM Dispatch] No valid FCM tokens found. Worker payload not sent.");
+      }
+
+      if (id) {
+        setItems(list => [{ id, ...payload }, ...list]);
+        lsSet("sawaed_last_announcement_id", id); // حتى لا يستقبل المُرسِل نفسه إشعاراً مكرراً
+        if (typeof sendLocalNotification === "function") sendLocalNotification(`📢 ${payload.title}`, payload.body);
+      }
+
+      setNotificationTitle("");
+      setNotificationBody("");
       setSent(true);
       setTimeout(() => setSent(false), 2000);
-    } else {
+    } catch (err) {
+      console.error("sendAnnouncement failed:", err);
       alert("⚠️ تعذّر إرسال الإشعار. تحقق من اتصالك بالإنترنت وحاول مرة أخرى.");
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   const deleteAnnouncement = async (id) => {
@@ -4851,9 +5028,9 @@ function AdminAnnouncements({ config, saveConfig, T, onBack }) {
         أرسل إشعاراً فورياً لكل الطلاب مباشرة — مستقل تماماً عن قسم الأخبار.
       </p>
       <div style={{ background: T.sectionBg, borderRadius: "14px", padding: "12px", marginBottom: "14px" }}>
-        <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="عنوان الإشعار *" style={inp} />
-        <textarea value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} placeholder="نص الإشعار (اختياري)..." style={{ ...inp, height: "70px", resize: "vertical" }} />
-        <button onClick={sendAnnouncement} disabled={sending || !form.title.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+        <input value={notificationTitle} onChange={e => setNotificationTitle(e.target.value)} placeholder="عنوان الإشعار *" style={inp} />
+        <textarea value={notificationBody} onChange={e => setNotificationBody(e.target.value)} placeholder="نص الإشعار (اختياري)..." style={{ ...inp, height: "70px", resize: "vertical" }} />
+        <button onClick={sendAnnouncement} disabled={sending || !notificationTitle.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: sending || !notificationTitle.trim() ? "not-allowed" : "pointer", opacity: sending || !notificationTitle.trim() ? 0.7 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
           {sending ? "⏳ جاري الإرسال..." : sent ? "✅ تم الإرسال!" : "📢 إرسال الآن"}
         </button>
       </div>

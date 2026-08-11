@@ -57,17 +57,21 @@ self.addEventListener("fetch", (event) => {
 
   // ملفات الشل وواجهة التطبيق (Cache First)
   if (request.mode === "navigate" || url.pathname.endsWith(".html")) {
+    if (!request.url.startsWith("http")) return;
+
     event.respondWith(
       caches.match(request).then((cached) => {
         return (
           cached ||
-          fetch(request).then((response) => {
-            if (response.ok) {
-              const copy = response.clone();
-              caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
-            }
-            return response;
-          })
+          fetch(request)
+            .then((response) => {
+              if (response.ok) {
+                const copy = response.clone();
+                caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));
+              }
+              return response;
+            })
+            .catch(() => new Response("{}", { status: 503, headers: { "Content-Type": "application/json" } }))
         );
       })
     );
@@ -75,9 +79,11 @@ self.addEventListener("fetch", (event) => {
   }
 
   // باقي الطلبات (Network First مع الرجوع للكاش)
+  if (!request.url.startsWith("http")) return;
+
   event.respondWith(
     caches.match(request).then((cached) => {
-      return cached || fetch(request);
+      return cached || fetch(request).catch(() => new Response("{}", { status: 503, headers: { "Content-Type": "application/json" } }));
     })
   );
 });
