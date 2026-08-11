@@ -1010,6 +1010,7 @@ export default function App() {
   });
   const [page, setPage] = useState("loading");
   const [notificationToast, setNotificationToast] = useState(null);
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
   const isFullAdmin = role === "super_admin";
@@ -1020,6 +1021,50 @@ export default function App() {
   const openAdminPanel = () => setPage("admin");
   const shouldForceOnboarding = Boolean(authNeedsOnboarding && currentUser && !isAdminLike);
   const handleOnboardingComplete = () => setPage("main");
+
+  const requestNotifications = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        const token = await requestFCMToken();
+        console.info("FCM token registration result:", token ? "success" : "no token");
+
+        if (token) {
+          new Notification("سواعد الخير ✅", { body: "تم تفعيل الإشعارات بنجاح!" });
+        } else {
+          console.warn("FCM token registration returned null. Check SW registration, VAPID key and Firestore rules.");
+        }
+      } else {
+        console.warn("Notification permission denied by browser user:", permission);
+      }
+    } catch (err) {
+      console.error("Notification toggle failed:", err);
+    }
+  }, []);
+
+  const dismissNotificationPrompt = useCallback((persist = true) => {
+    if (persist) {
+      localStorage.setItem("notification_prompt_handled", "true");
+    }
+    setShowNotificationPrompt(false);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || typeof Notification === "undefined") {
+      setShowNotificationPrompt(false);
+      return;
+    }
+
+    const alreadyHandled = localStorage.getItem("notification_prompt_handled") === "true";
+    if (!alreadyHandled && Notification.permission === "default") {
+      setShowNotificationPrompt(true);
+    } else {
+      setShowNotificationPrompt(false);
+    }
+  }, [currentUser?.uid, currentUser?.email]);
+
   const [subjectNav, setSubjectNav] = useState(null);
   const [folderNav, setFolderNav] = useState(null);
   const [foundNav, setFoundNav] = useState(null);
@@ -1431,6 +1476,28 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl", paddingBottom: "80px", boxSizing: "border-box", width: "100%", paddingInline: "16px" }}>
+      {showNotificationPrompt && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10, 10, 20, 0.72)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: "20px" }} onClick={() => dismissNotificationPrompt(true)}>
+          <div style={{ width: "100%", maxWidth: "420px", background: "rgba(17, 18, 31, 0.96)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "22px", boxShadow: "0 24px 60px rgba(0,0,0,0.4)", padding: "20px 20px 16px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: "42px", marginBottom: "10px" }}>🔔</div>
+            <h3 style={{ margin: "0 0 10px", color: "#fff", fontSize: "20px", fontWeight: "800", lineHeight: 1.5 }}>
+              فعل الإشعارات لتصلك أخر مستجدات الدراسة
+            </h3>
+            <p style={{ margin: "0 0 18px", color: "#a9acc7", fontSize: "13px", lineHeight: 1.6 }}>
+              يمكنك تفعيل الإشعارات في أي وقت من الإعدادات
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button onClick={async () => { dismissNotificationPrompt(true); await requestNotifications(); }} style={{ flex: "1 1 150px", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", border: "none", borderRadius: "12px", padding: "12px 16px", fontSize: "15px", fontWeight: "700", cursor: "pointer", boxShadow: "0 10px 28px rgba(34,197,94,0.28)" }}>
+                تفعيل
+              </button>
+              <button onClick={() => dismissNotificationPrompt(true)} style={{ flex: "1 1 150px", background: "rgba(255,255,255,0.08)", color: "#dfe3ff", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "12px 16px", fontSize: "15px", fontWeight: "600", cursor: "pointer" }}>
+                لا، لاحقاً
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: APP_MAX_WIDTH, margin: "0 auto", width: "100%" }}>
       {/* ─── Mini Timer يشتغل في الخلفية طول وقت استخدام التطبيق ─── */}
       <TimerMiniWidget T={T} onOpen={() => setShowTimerModal(true)} />
