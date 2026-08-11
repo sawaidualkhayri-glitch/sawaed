@@ -951,6 +951,8 @@ const DEFAULT_CONFIG = {
   savedCategories: ["مميز بنجمة"],
   savedTypes: ["ملف من المواد", "روابط من أي مكان", "خبر من الأخبار", "ملفات من التأسيس"],
   contactLinks: [{ label: "تواصل معنا عبر واتساب", url: "https://whatsapp.com/channel/0029VbCYtmCKwqSKQllr5w3p", icon: "💬" }],
+  motivationalQuotes: [],
+  motivationalFixed: false,
   // ============================================================
   // حسابات المحررين الافتراضية (يمكن للمحرر "admin" فقط إضافة/حذف محررين)
   // ============================================================
@@ -1045,11 +1047,11 @@ export default function App() {
   }, []);
 
   const dismissNotificationPrompt = useCallback((persist = true) => {
-    if (persist) {
-      localStorage.setItem("notification_prompt_handled", "true");
+    if (persist && currentUser?.uid) {
+      localStorage.setItem(`notification_prompt_handled_${currentUser.uid}`, "true");
     }
     setShowNotificationPrompt(false);
-  }, []);
+  }, [currentUser?.uid]);
 
   useEffect(() => {
     if (!currentUser || typeof Notification === "undefined") {
@@ -1057,7 +1059,8 @@ export default function App() {
       return;
     }
 
-    const alreadyHandled = localStorage.getItem("notification_prompt_handled") === "true";
+    const promptKey = `notification_prompt_handled_${currentUser.uid}`;
+    const alreadyHandled = localStorage.getItem(promptKey) === "true";
     if (!alreadyHandled && Notification.permission === "default") {
       setShowNotificationPrompt(true);
     } else {
@@ -4852,8 +4855,13 @@ function AdminLessons({ config, saveConfig, T, onBack }) {
 
 function AdminQuotes({ config, saveConfig, T, onBack }) {
   const [quotes, setQuotes] = useState([...(config.motivationalQuotes || [])]);
-  const [fixed, setFixed] = useState(config.motivationalFixed);
+  const [fixed, setFixed] = useState(Boolean(config.motivationalFixed));
   const [form, setForm] = useState({ text: "", duration: 60 });
+
+  useEffect(() => {
+    setQuotes(Array.isArray(config.motivationalQuotes) ? [...config.motivationalQuotes] : []);
+    setFixed(Boolean(config.motivationalFixed));
+  }, [config.motivationalQuotes, config.motivationalFixed]);
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box" };
 
