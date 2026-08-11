@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+pdfjs.GlobalWorkerOptions.workerSrc = `${window.location.origin}/pdf.worker.min.js`;
 
 export default function PDFViewer({ fileUrl, title }) {
   const [numPages, setNumPages] = useState(null);
@@ -45,7 +45,7 @@ export default function PDFViewer({ fileUrl, title }) {
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
           loading={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Loading PDF...</div>}
-          error={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Failed to load PDF. Check worker path.</div>}
+          error={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>Failed to load PDF. Check worker path or proxy response.</div>}
         >
           <div style={{ display: "flex", justifyContent: "center", width: "100%", background: "#111" }}>
             <div style={{ width: "100%", maxWidth: width, display: "flex", justifyContent: "center" }}>
@@ -63,7 +63,7 @@ export default function PDFViewer({ fileUrl, title }) {
 
       {error && (
         <div style={{ marginTop: 14, color: "#f8d7da", background: "#421013", borderRadius: 12, padding: "12px 14px", width: "100%", maxWidth: 960, textAlign: "center" }}>
-          PDF failed to load. Try opening the file in a new tab.
+          PDF failed to load. Try opening the file in a new tab or reloading the worker.
         </div>
       )}
 

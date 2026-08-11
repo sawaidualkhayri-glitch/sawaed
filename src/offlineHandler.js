@@ -1,11 +1,13 @@
 // src/offlineHandler.js
 
-import { cloudflareWorkerBaseUrl } from "./config";
+import { buildCloudflareWorkerFileUrl, cloudflareWorkerBaseUrl } from "./config";
 
-const WORKER_URL = `${cloudflareWorkerBaseUrl}/`;
 const CACHE_DB_NAME = "sawaed_offline_cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE = "cache";
+
+const normalizeCacheKey = (itemId) => `/offline-files/${String(itemId ?? "").trim()}`;
+const getWorkerFileUrl = (itemId) => buildCloudflareWorkerFileUrl(itemId);
 
 function openCacheDB() {
   return new Promise((resolve, reject) => {
@@ -88,7 +90,7 @@ export async function clearCachedBlob(key) {
 
 export const checkIsFileCached = async (itemId) => {
   if (!("caches" in window)) return false;
-  const cacheKey = `/offline-files/${itemId}`;
+  const cacheKey = normalizeCacheKey(itemId);
   const match = await caches.match(cacheKey);
   return !!match;
 };
@@ -102,8 +104,8 @@ export const saveFileForOffline = (itemId) => {
       return reject(new Error("الـ Service Worker غير نشط حالياً"));
     }
 
-    const targetUrl = `${WORKER_URL}?fileId=${itemId}`;
-    const cacheKey = `/offline-files/${itemId}`;
+    const cacheKey = normalizeCacheKey(itemId);
+    const targetUrl = getWorkerFileUrl(itemId);
     const channel = new MessageChannel();
 
     channel.port1.onmessage = (event) => {
@@ -124,7 +126,7 @@ export const removeFileFromOffline = (itemId) => {
       return resolve(false);
     }
 
-    const cacheKey = `/offline-files/${itemId}`;
+    const cacheKey = normalizeCacheKey(itemId);
     const channel = new MessageChannel();
 
     channel.port1.onmessage = (event) => resolve(!!event.data?.success);
@@ -137,14 +139,33 @@ export const removeFileFromOffline = (itemId) => {
 };
 
 export const openOfflineFile = async (itemId) => {
-  const cacheKey = `/offline-files/${itemId}`;
+  const cacheKey = normalizeCacheKey(itemId);
   const cachedResponse = await caches.match(cacheKey);
 
   if (cachedResponse) {
     const blob = await cachedResponse.blob();
     const fileUrl = URL.createObjectURL(blob);
-    window.open(fileUrl, "_blank");
-  } else {
-    window.open(`${WORKER_URL}?fileId=${itemId}`, "_blank");
+    return {
+      url: fileUrl,
+      blob,
+      cached: true,
+      cleanup: () => URL.revokeObjectURL(fileUrl),
+    };
+  }
+
+  const proxyUrl = getWorkerFileUrl(itemId);
+  return {
+    url: proxyUrl,
+    blob: null,
+    cached: false,
+    cleanup: () => undefined,
+  };
+};
+
+export const revokeObjectUrl = (fileUrl) => {
+  if (typeof fileUrl === "string" && fileUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(fileUrl);
   }
 };
+
+export { cloudflareWorkerBaseUrl };

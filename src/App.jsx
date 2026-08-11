@@ -162,7 +162,17 @@ function driveDownloadUrl(url) {
 function driveProxyUrl(urlOrId) {
   const id = extractDriveId(urlOrId) || urlOrId;
   if (!id) return null;
-  return `${CF_WORKER_URL}${id}`;
+  const proxyUrl = new URL(CF_WORKER_URL);
+  proxyUrl.searchParams.set("fileId", String(id));
+  return proxyUrl.toString();
+}
+
+function normalizeFetchUrl(inputUrl) {
+  if (!inputUrl || typeof inputUrl !== "string") return inputUrl;
+  if (inputUrl.startsWith("blob:")) return inputUrl;
+  if (inputUrl.includes(cloudflareWorkerBaseUrl) && inputUrl.includes("fileId=")) return inputUrl;
+  if (typeof isDriveUrl === "function" && isDriveUrl(inputUrl)) return driveProxyUrl(inputUrl) || inputUrl;
+  return inputUrl;
 }
 
 function getDriveDirectUrl(url) {
@@ -316,9 +326,14 @@ async function downloadItemToDevice(item) {
 }
 
 async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"]) {
+  const safeUrl = normalizeFetchUrl(url);
+  if (typeof isDriveUrl === "function" && isDriveUrl(url) && safeUrl === url) {
+    throw new Error("Direct Google Drive fetch blocked; Cloudflare proxy is required.");
+  }
+
   // Try to fetch the resource and ensure it's binary (not an HTML fallback page).
-  const response = await fetch(url, { mode: "cors" }).catch(err => { throw new Error("NETWORK_ERROR:" + (err?.message || err)); });
-  if (!response.ok) throw new Error(`HTTP ${response.status} when fetching ${url}`);
+  const response = await fetch(safeUrl, { mode: "cors" }).catch(err => { throw new Error("NETWORK_ERROR:" + (err?.message || err)); });
+  if (!response.ok) throw new Error(`HTTP ${response.status} when fetching ${safeUrl}`);
   const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
 
   // If the server returned HTML (Drive confirmation pages, 404 SPA page, etc.), read the text and abort.
@@ -1038,13 +1053,37 @@ export default function App() {
         } else {
           console.warn("FCM token registration returned null. Check SW registration, VAPID key and Firestore rules.");
         }
-      } else {
-        console.warn("Notification permission denied by browser user:", permission);
+
+        if (currentUser?.uid) {
+          localStorage.setItem(`notification_prompt_handled_${currentUser.uid}`, "true");
+        }
+        setShowNotificationPrompt(false);
+        return;
       }
+
+      console.warn("Notification permission denied or quiet-blocked by browser:", permission);
+      if (currentUser?.uid) {
+        localStorage.setItem(`notification_prompt_handled_${currentUser.uid}`, "true");
+      }
+      setShowNotificationPrompt(false);
+      setNotificationToast({
+        title: "تفعيل الإشعارات",
+        body: "إذا لم تظهر نافذة التفعيل، يرجى الضغط على أيقونة الجرس 🔔 بجانب رابط الموقع (URL) أعلى الصفحة واختيار Allow.",
+      });
+      window.setTimeout(() => setNotificationToast(null), 6000);
     } catch (err) {
       console.error("Notification toggle failed:", err);
+      if (currentUser?.uid) {
+        localStorage.setItem(`notification_prompt_handled_${currentUser.uid}`, "true");
+      }
+      setShowNotificationPrompt(false);
+      setNotificationToast({
+        title: "تفعيل الإشعارات",
+        body: "إذا لم تظهر نافذة التفعيل، يرجى الضغط على أيقونة الجرس 🔔 بجانب رابط الموقع (URL) أعلى الصفحة واختيار Allow.",
+      });
+      window.setTimeout(() => setNotificationToast(null), 6000);
     }
-  }, []);
+  }, [currentUser?.uid]);
 
   const dismissNotificationPrompt = useCallback((persist = true) => {
     if (persist && currentUser?.uid) {
@@ -1489,8 +1528,11 @@ export default function App() {
             <p style={{ margin: "0 0 18px", color: "#a9acc7", fontSize: "13px", lineHeight: 1.6 }}>
               يمكنك تفعيل الإشعارات في أي وقت من الإعدادات
             </p>
+            <div style={{ marginBottom: "16px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "12px", padding: "10px 12px", color: "#dfe3ff", fontSize: "12px", lineHeight: 1.6 }}>
+              إذا لم تظهر نافذة التفعيل، يرجى الضغط على أيقونة الجرس 🔔 بجانب رابط الموقع (URL) أعلى الصفحة واختيار Allow.
+            </div>
             <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
-              <button onClick={async () => { dismissNotificationPrompt(true); await requestNotifications(); }} style={{ flex: "1 1 150px", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", border: "none", borderRadius: "12px", padding: "12px 16px", fontSize: "15px", fontWeight: "700", cursor: "pointer", boxShadow: "0 10px 28px rgba(34,197,94,0.28)" }}>
+              <button onClick={async () => { await requestNotifications(); }} style={{ flex: "1 1 150px", background: "linear-gradient(135deg, #16a34a, #22c55e)", color: "#fff", border: "none", borderRadius: "12px", padding: "12px 16px", fontSize: "15px", fontWeight: "700", cursor: "pointer", boxShadow: "0 10px 28px rgba(34,197,94,0.28)" }}>
                 تفعيل
               </button>
               <button onClick={() => dismissNotificationPrompt(true)} style={{ flex: "1 1 150px", background: "rgba(255,255,255,0.08)", color: "#dfe3ff", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "12px", padding: "12px 16px", fontSize: "15px", fontWeight: "600", cursor: "pointer" }}>
@@ -1498,6 +1540,13 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {notificationToast && (
+        <div style={{ position: "fixed", left: "50%", bottom: "92px", transform: "translateX(-50%)", maxWidth: "420px", width: "calc(100% - 24px)", background: "rgba(15, 18, 30, 0.96)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "14px", padding: "12px 14px", boxShadow: "0 18px 32px rgba(0,0,0,0.28)", zIndex: 99998, color: "#fff" }}>
+          <div style={{ fontWeight: "800", marginBottom: "4px", fontSize: "13px" }}>{notificationToast.title}</div>
+          <div style={{ fontSize: "12px", color: "#dfe3ff", lineHeight: 1.5 }}>{notificationToast.body}</div>
         </div>
       )}
 
