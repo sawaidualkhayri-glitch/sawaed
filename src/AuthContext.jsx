@@ -1,103 +1,119 @@
+/* ==========================================================================
+   START SECTION: Authentication State Management & User Context
+   ========================================================================== */
+
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db, isFirebaseConfigured } from "./firebase";
-import { logoutUser } from "./firebaseAuth";
-import { cacheJson, clearCachedJson, getCachedJson } from "./offlineHandler";
-import { ALL_EDITOR_ROLES } from "./constants";
+  import { createContext, useContext, useEffect, useState, useCallback } from "react";
+  import { onAuthStateChanged } from "firebase/auth";
+  import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+  import { auth, db, isFirebaseConfigured } from "./firebase";
+  import { logoutUser } from "./firebaseAuth";
+  import { cacheJson, clearCachedJson, getCachedJson } from "./offlineHandler";
+  import { ALL_EDITOR_ROLES } from "./constants";
 
-const AuthContext = createContext(null);
+  /* --- START SUBSECTION: Auth Context Creation --- */
+  const AuthContext = createContext(null);
+  /* --- END SUBSECTION: Auth Context Creation --- */
 
-export function normalizeUserRole(role) {
-  const normalized = (role || "").trim();
-  switch (normalized) {
-    case "super_admin":
-    case "admin":
-      return "super_admin";
-    case "editor_full":
-    case "all":
-      return "editor_full";
-    case "editor_malazem":
-    case "editor_materials":
-    case "editor_study":
-    case "notes":
-      return "editor_malazem";
-    case "editor_taasees":
-    case "editor_tasiss":
-    case "foundation":
-      return "editor_taasees";
-    case "editor_news":
-    case "content":
-      return "editor_news";
-    case "custom":
-      return "custom";
-    default:
-      return normalized || "user";
+  /* --- START SUBSECTION: User Role Normalization --- */
+  export function normalizeUserRole(role) {
+    const normalized = (role || "").trim();
+    switch (normalized) {
+      case "super_admin":
+      case "admin":
+        return "super_admin";
+      case "editor_full":
+      case "all":
+        return "editor_full";
+      case "editor_malazem":
+      case "editor_materials":
+      case "editor_study":
+      case "notes":
+        return "editor_malazem";
+      case "editor_taasees":
+      case "editor_tasiss":
+      case "foundation":
+        return "editor_taasees";
+      case "editor_news":
+      case "content":
+        return "editor_news";
+      case "custom":
+        return "custom";
+      default:
+        return normalized || "user";
+    }
   }
-}
+  /* --- END SUBSECTION: User Role Normalization --- */
 
-export const isAnyEditor = (role) => ALL_EDITOR_ROLES.includes(normalizeUserRole(role));
-export const canManageEditors = (role) => ["super_admin", "admin"].includes(normalizeUserRole(role));
-export const canManageMalazem = (role) => ["super_admin", "admin", "editor_full", "editor_malazem"].includes(normalizeUserRole(role));
-export const canManageTaasees = (role) => ["super_admin", "admin", "editor_full", "editor_taasees"].includes(normalizeUserRole(role));
-export const canManageNews = (role) => ["super_admin", "admin", "editor_full", "editor_news"].includes(normalizeUserRole(role));
+  /* --- START SUBSECTION: Role-Based Permission Checks --- */
+  export const isAnyEditor = (role) => ALL_EDITOR_ROLES.includes(normalizeUserRole(role));
+  export const canManageEditors = (role) => ["super_admin", "admin"].includes(normalizeUserRole(role));
+  export const canManageMalazem = (role) => ["super_admin", "admin", "editor_full", "editor_malazem"].includes(normalizeUserRole(role));
+  export const canManageTaasees = (role) => ["super_admin", "admin", "editor_full", "editor_taasees"].includes(normalizeUserRole(role));
+  export const canManageNews = (role) => ["super_admin", "admin", "editor_full", "editor_news"].includes(normalizeUserRole(role));
+  /* --- END SUBSECTION: Role-Based Permission Checks --- */
 
-function canonicalizeGrade(grade) {
-  if (!grade || typeof grade !== "string") return grade || "";
-  const normalized = grade.trim().replace(/\s+/g, " ");
-  if (normalized === "ثاني عشر" || normalized === "ثاني عشر (توجيهي)" || normalized.includes("ثاني عشر")) {
-    return "ثاني عشر (توجيهي)";
+  /* --- START SUBSECTION: Grade & Branch Canonicalization --- */
+  function canonicalizeGrade(grade) {
+    if (!grade || typeof grade !== "string") return grade || "";
+    const normalized = grade.trim().replace(/\s+/g, " ");
+    if (normalized === "ثاني عشر" || normalized === "ثاني عشر (توجيهي)" || normalized.includes("ثاني عشر")) {
+      return "ثاني عشر (توجيهي)";
+    }
+    return normalized;
   }
-  return normalized;
-}
 
-function canonicalizeBranch(branch) {
-  if (!branch || typeof branch !== "string") return branch || "";
-  const normalized = branch.trim().replace(/\s+/g, " ");
-  if (normalized === "ادبي" || normalized === "أدبي") return "أدبي";
-  return normalized;
-}
+  function canonicalizeBranch(branch) {
+    if (!branch || typeof branch !== "string") return branch || "";
+    const normalized = branch.trim().replace(/\s+/g, " ");
+    if (normalized === "ادبي" || normalized === "أدبي") return "أدبي";
+    return normalized;
+  }
+  /* --- END SUBSECTION: Grade & Branch Canonicalization --- */
 
-function buildUserProfile(firebaseUser, profile = {}) {
-  const uid = firebaseUser.uid;
-  const role = normalizeUserRole(profile.role || "user");
-  const displayName = profile.displayName || profile.fullName || firebaseUser.displayName || "مستخدم";
-  const fullName = profile.fullName || firebaseUser.displayName || "مستخدم";
-  const grade = canonicalizeGrade(profile.grade || "");
-  const branch = canonicalizeBranch(profile.branch || profile.stream || "");
-  const stream = canonicalizeBranch(profile.stream || profile.branch || "");
-  const hasProfileData = Boolean((grade || "").trim() && (stream || branch || "").trim());
-  const profileCompleted = profile.profileCompleted === true || hasProfileData;
+  /* --- START SUBSECTION: User Profile Construction --- */
+  function buildUserProfile(firebaseUser, profile = {}) {
+    const uid = firebaseUser.uid;
+    const role = normalizeUserRole(profile.role || "user");
+    const displayName = profile.displayName || profile.fullName || firebaseUser.displayName || "مستخدم";
+    const fullName = profile.fullName || firebaseUser.displayName || "مستخدم";
+    const grade = canonicalizeGrade(profile.grade || "");
+    const branch = canonicalizeBranch(profile.branch || profile.stream || "");
+    const stream = canonicalizeBranch(profile.stream || profile.branch || "");
+    const hasProfileData = Boolean((grade || "").trim() && (stream || branch || "").trim());
+    const profileCompleted = profile.profileCompleted === true || hasProfileData;
 
-  return {
-    id: uid,
-    uid,
-    email: firebaseUser.email || profile.email || "",
-    displayName,
-    fullName,
-    username: displayName,
-    nickname: profile.nickname || displayName,
-    ...profile,
-    grade,
-    branch,
-    stream,
-    progress: profile.progress || {},
-    savedItems: profile.savedItems || [],
-    pinnedNews: profile.pinnedNews || [],
-    profileCompleted,
-    role,
-    isAdmin: role === "super_admin",
-  };
-}
+    return {
+      id: uid,
+      uid,
+      email: firebaseUser.email || profile.email || "",
+      displayName,
+      fullName,
+      username: displayName,
+      nickname: profile.nickname || displayName,
+      ...profile,
+      grade,
+      branch,
+      stream,
+      progress: profile.progress || {},
+      savedItems: profile.savedItems || [],
+      pinnedNews: profile.pinnedNews || [],
+      profileCompleted,
+      role,
+      isAdmin: role === "super_admin",
+    };
+  }
+  /* --- END SUBSECTION: User Profile Construction --- */
 
-function shouldRequireOnboarding(profile = {}, role = null) {
-  const normalizedRole = normalizeUserRole(role || profile?.role || "user");
-  if (isAnyEditor(normalizedRole)) return false;
-  const grade = (profile?.grade || "").toString().trim();
-  const branch = (profile?.branch || profile?.stream || "").toString().trim();
-  return !grade || !branch;
-}
+  /* --- START SUBSECTION: Onboarding Requirements Check --- */
+  function shouldRequireOnboarding(profile = {}, role = null) {
+    const normalizedRole = normalizeUserRole(role || profile?.role || "user");
+    if (isAnyEditor(normalizedRole)) return false;
+    const grade = (profile?.grade || "").toString().trim();
+    const branch = (profile?.branch || profile?.stream || "").toString().trim();
+    return !grade || !branch;
+  }
+  /* --- END SUBSECTION: Onboarding Requirements Check --- */
 
 export function AuthProvider({ children }) {
   const [firebaseUser, setFirebaseUser] = useState(null);

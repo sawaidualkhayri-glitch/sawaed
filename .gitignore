@@ -30,3 +30,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Ignore audit reports
+reports/
+CLEANUP_AUDIT_REPORT.md
+CODE_AUDIT_COMPLETION_REPORT.md
+AUDIT_COMPLETION_MANIFEST.md

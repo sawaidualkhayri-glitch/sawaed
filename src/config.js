@@ -1,14 +1,26 @@
-const defaultWorkerUrl = "https://sawaed.hamodemsg.workers.dev";
+/* ==========================================================================
+   START SECTION: Cloudflare Worker Configuration
+   ========================================================================== */
 
-const normalizeBaseUrl = (value) => {
-  if (!value || typeof value !== "string") return defaultWorkerUrl;
-  return value.trim().replace(/\/+$/, "");
-};
+  /* --- START SUBSECTION: Worker URL Setup --- */
+  const defaultWorkerUrl = "https://sawaed.hamodemsg.workers.dev";
 
-export const cloudflareWorkerBaseUrl = normalizeBaseUrl(import.meta.env.VITE_CLOUDFLARE_WORKER_URL || defaultWorkerUrl);
+  const normalizeBaseUrl = (value) => {
+    if (!value || typeof value !== "string") return defaultWorkerUrl;
+    return value.trim().replace(/\/+$/, "");
+  };
 
-export const buildCloudflareWorkerFileUrl = (fileId) => {
-  const normalizedId = String(fileId ?? "").trim();
-  if (!normalizedId) return `${cloudflareWorkerBaseUrl}/`;
-  return `${cloudflareWorkerBaseUrl}/?fileId=${encodeURIComponent(normalizedId)}`;
-};
+  export const cloudflareWorkerBaseUrl = normalizeBaseUrl(import.meta.env.VITE_CLOUDFLARE_WORKER_URL || defaultWorkerUrl);
+  /* --- END SUBSECTION: Worker URL Setup --- */
+
+  /* --- START SUBSECTION: Worker File URL Builder --- */
+  export const buildCloudflareWorkerFileUrl = (fileId) => {
+    const normalizedId = String(fileId ?? "").trim();
+    if (!normalizedId) return `${cloudflareWorkerBaseUrl}/`;
+    return `${cloudflareWorkerBaseUrl}/?fileId=${encodeURIComponent(normalizedId)}`;
+  };
+  /* --- END SUBSECTION: Worker File URL Builder --- */
+
+/* ==========================================================================
+   END SECTION: Cloudflare Worker Configuration
+   ========================================================================== */
