@@ -1893,14 +1893,11 @@ function HomePage({ config, T, darkMode, currentUser, flame, onSubject }) {
     console.warn(`فشل في تحليل الدروس لـ ${sub}:`, e);
     lessons = [];
   }
-  
-  const done = (currentUser.progress?.[`${key}_${sub}`] || []).length;
-  const total = lessons.length;
-  
-  // حساب النسبة المئوية هنا بدقة
-  const pct = total ? Math.round((done / total) * 100) : 0;
 
-  // Removed confetti side-effects from render-time. Celebrations occur in SubjectPage only.
+  const rawDoneLessons = Array.isArray(currentUser.progress?.[`${key}_${sub}`]) ? currentUser.progress[`${key}_${sub}`] : [];
+  const done = lessons.filter((lesson) => rawDoneLessons.includes(lesson)).length;
+  const total = lessons.length;
+  const pct = total ? Math.min(Math.round((done / total) * 100), 100) : 0;
 
   return { pct, done, total };
 };
@@ -2392,10 +2389,12 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
       }
     }
   }
-  const doneLessons = currentUser?.progress?.[`${subjectKey}_${sub}`] || [];
+  const progressKey = `${subjectKey}_${sub}`;
+  const rawDoneLessons = Array.isArray(currentUser?.progress?.[progressKey]) ? currentUser.progress[progressKey] : [];
+  const doneLessons = lessons.filter((lesson) => rawDoneLessons.includes(lesson));
   const done = doneLessons.length;
   const total = lessons.length;
-  const pct = total ? Math.round((done / total) * 100) : 0;
+  const pct = total ? Math.min(Math.round((done / total) * 100), 100) : 0;
   const [celebrated, setCelebrated] = useState(false);
   const [showLessons, setShowLessons] = useState(false);
 
@@ -2405,8 +2404,17 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
     const arr = [...doneLessons];
     const idx = arr.indexOf(l);
     if (idx >= 0) arr.splice(idx, 1); else arr.push(l);
-    await updateUser({ progress: { ...currentUser.progress, [`${subjectKey}_${sub}`]: arr } });
+    await updateUser({ progress: { ...currentUser.progress, [progressKey]: arr } });
   };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!Array.isArray(rawDoneLessons)) return;
+    const hasStaleItems = rawDoneLessons.some((lesson) => !lessons.includes(lesson));
+    if (hasStaleItems) {
+      updateUser({ progress: { ...currentUser.progress, [progressKey]: doneLessons } }).catch(console.error);
+    }
+  }, [currentUser, lessons, progressKey, rawDoneLessons, doneLessons, updateUser]);
 
   useEffect(() => {
     if (total > 0 && pct === 100 && !celebrated) {
