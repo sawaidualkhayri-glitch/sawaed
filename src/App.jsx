@@ -332,7 +332,33 @@ async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"]) {
   }
 
   // Try to fetch the resource and ensure it's binary (not an HTML fallback page).
-  const response = await fetch(safeUrl, { mode: "cors" }).catch(err => { throw new Error("NETWORK_ERROR:" + (err?.message || err)); });
+  let response;
+  try {
+    response = await fetch(safeUrl, { mode: "cors" });
+  } catch (err) {
+    throw new Error("NETWORK_ERROR:" + (err?.message || err));
+  }
+
+  // Handle Cloudflare Worker 403 response with requireIframe flag
+  if (response.status === 403) {
+    const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+    if (contentType.includes("application/json")) {
+      try {
+        const jsonData = await response.json();
+        if (jsonData.requireIframe === true && jsonData.fileId) {
+          const error = new Error("REQUIRE_IFRAME:" + jsonData.fileId);
+          error.fileId = jsonData.fileId;
+          error.requireIframe = true;
+          throw error;
+        }
+      } catch (parseErr) {
+        if (parseErr.requireIframe) throw parseErr;
+        console.warn("Failed to parse 403 JSON response:", parseErr);
+      }
+    }
+    throw new Error(`HTTP 403 when fetching ${safeUrl} - File not available for direct download`);
+  }
+
   if (!response.ok) throw new Error(`HTTP ${response.status} when fetching ${safeUrl}`);
   const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
 
@@ -1977,6 +2003,8 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
   const [numPages, setNumPages] = useState(null);
   const [pdfError, setPdfError] = useState(false);
   const [pdfResolvedUrl, setPdfResolvedUrl] = useState(null);
+  const [useIframeFallback, setUseIframeFallback] = useState(false);
+  const [iframeFileId, setIframeFileId] = useState(null);
 
   const fileId = getOfflineFileId(url);
 
@@ -2088,12 +2116,14 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
     // Only run for PDF previews that are not already saved as blobs
     if (!isPdfMimeType(mimeType)) return;
     if (isSavedOffline || isBlobDirect) return;
+    if (useIframeFallback) return; // Skip if already using iframe
 
     let cancelled = false;
     let resolvedObj = null;
 
     const resolveOnlinePdf = async () => {
       setPdfResolvedUrl(null);
+      setUseIframeFallback(false);
       try {
         // Prefer Cloudflare worker proxy for Drive links (if available)
         const candidate = (typeof isDriveUrl === "function" && isDriveUrl(url)) ? driveProxyUrl(url) : null;
@@ -2101,9 +2131,21 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
           try {
             const b = await fetchBinaryBlob(candidate, [mimeType || "application/pdf"]);
             resolvedObj = URL.createObjectURL(b);
-            if (!cancelled) setPdfResolvedUrl(resolvedObj);
+            if (!cancelled) {
+              setPdfResolvedUrl(resolvedObj);
+              setLoading(false);
+            }
             return;
           } catch (err) {
+            // Check if error indicates we need to use iframe fallback
+            if (err.message?.startsWith("REQUIRE_IFRAME:") && err.fileId) {
+              if (!cancelled) {
+                setIframeFileId(err.fileId);
+                setUseIframeFallback(true);
+                setLoading(false);
+              }
+              return;
+            }
             console.warn("drive proxy binary fetch failed, falling back:", err);
           }
         }
@@ -2112,12 +2154,26 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
         try {
           const b = await fetchBinaryBlob(getDownloadUrl(url), [mimeType || "application/pdf"]);
           resolvedObj = URL.createObjectURL(b);
-          if (!cancelled) setPdfResolvedUrl(resolvedObj);
+          if (!cancelled) {
+            setPdfResolvedUrl(resolvedObj);
+            setLoading(false);
+          }
           return;
         } catch (err) {
+          // Check if error indicates we need to use iframe fallback
+          if (err.message?.startsWith("REQUIRE_IFRAME:") && err.fileId) {
+            if (!cancelled) {
+              setIframeFileId(err.fileId);
+              setUseIframeFallback(true);
+              setLoading(false);
+            }
+            return;
+          }
           console.warn("pdf binary fetch fallback failed:", err);
+          if (!cancelled) setLoading(false);
         }
-      } finally {
+      } catch (err) {
+        console.warn("Unexpected error in resolveOnlinePdf:", err);
         if (!cancelled) setLoading(false);
       }
     };
@@ -2130,7 +2186,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
       cancelled = true;
       if (resolvedObj) URL.revokeObjectURL(resolvedObj);
     };
-  }, [url, mimeType, isSavedOffline, isBlobDirect]);
+  }, [url, mimeType, isSavedOffline, isBlobDirect, useIframeFallback]);
 
   const handleSaveOffline = async () => {
     if (isSavedOffline) return;
@@ -2282,6 +2338,18 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
           <div style={{ fontSize: "64px", marginBottom: "20px" }}>📴</div>
           <h3 style={{ color: "#fff", fontSize: "20px", margin: "0 0 12px" }}>هذا الملف غير متوفر بدون إنترنت</h3>
           <p style={{ color: "#ccc", fontSize: "14px", maxWidth: "340px", margin: "0 0 26px" }}>يرجى الاتصال بالشبكة لفتح الملف أونلاين أولاً، ثم اضغط على زر "تحميل للوضع أوفلاين" ليتم تخزينه وحفظه بذاكرة التطبيق.</p>
+        </div>
+      ) : useIframeFallback && iframeFileId ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#111" }}>
+          <div style={{ padding: "12px", background: "#1a3a1a", color: "#90ee90", fontSize: "13px", textAlign: "center" }}>
+            ℹ️ يتم عرض الملف عبر Google Drive Preview
+          </div>
+          <iframe
+            src={`https://drive.google.com/file/d/${iframeFileId}/preview`}
+            style={{ flex: 1, border: "none", width: "100%", height: "100%" }}
+            title={title || "PDF Document"}
+            allow="autoplay; fullscreen"
+          />
         </div>
       ) : (
         isPdfMimeType(mimeType) ? (
@@ -4951,16 +5019,10 @@ function AdminQuotes({ config, saveConfig, T, onBack }) {
 
 function AdminFoundation({ config, saveConfig, T, onBack }) {
   const [selSub, setSelSub] = useState(config.foundationSubjects?.[0] || "");
-  const [selBranch, setSelBranch] = useState("عام");
+  const [selBranch, setSelBranch] = useState((config.foundationBranches?.[config.foundationSubjects?.[0]] || [])[0] || "");
   const [selType, setSelType] = useState("electronic");
   const [selArea, setSelArea] = useState((config.foundationTypes?.electronic || [])[0] || "");
-  const [uploading, setUploading] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
   const [form, setForm] = useState({ title: "", url: "", description: "", teacher: "", type: "link" });
-  const [showDriveLinkModal, setShowDriveLinkModal] = useState(false);
-  const [pendingUploadFile, setPendingUploadFile] = useState(null);
-  const [driveLink, setDriveLink] = useState("");
-  const fileRef = useRef();
 
   const foundKey = normalizeFoundKey({ subject: selSub, branch: selBranch, type: selType, sub: selArea });
   const [items, setItems] = useState([]);
@@ -4972,28 +5034,7 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
     setItems(newItems);
   };
 
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    setUploading(true); setUploadPct(0);
-    setPendingUploadFile(file);
-    setDriveLink("");
-    setShowDriveLinkModal(true);
-  };
 
-  const handleDriveLinkSubmit = () => {
-    if (!pendingUploadFile || !driveLink.trim()) {
-      setPendingUploadFile(null);
-      setShowDriveLinkModal(false);
-      setUploading(false);
-      return;
-    }
-    const fileType = pendingUploadFile.type.includes("pdf") ? "pdf" : pendingUploadFile.type.includes("image") ? "image" : "link";
-    setForm(f => ({ ...f, title: f.title || pendingUploadFile.name.replace(/\.[^/.]+$/, ""), url: driveLink.trim(), type: fileType }));
-    setPendingUploadFile(null);
-    setDriveLink("");
-    setShowDriveLinkModal(false);
-    setUploading(false);
-  };
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
   const sel = { ...inp };
@@ -5002,7 +5043,6 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
     <AdminSection title="محتوى التأسيس" icon="🏗️" T={T} onBack={onBack} onSave={() => {}}>
       <select value={selSub} onChange={e => setSelSub(e.target.value)} style={sel}>{config.foundationSubjects?.map(s => <option key={s} value={s}>{s}</option>)}</select>
       <select value={selBranch} onChange={e => setSelBranch(e.target.value)} style={sel}>
-        <option value="عام">عام</option>
         {(config.foundationBranches?.[selSub] || []).map(b => <option key={b} value={b}>{b}</option>)}
       </select>
       <select value={selType} onChange={e => { setSelType(e.target.value); setSelArea((config.foundationTypes?.[e.target.value] || [])[0] || ""); }} style={sel}>
@@ -5013,26 +5053,12 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
         {(config.foundationTypes?.[selType] || []).map(a => <option key={a} value={a}>{a}</option>)}
       </select>
       <div style={{ background: T.sectionBg, borderRadius: "14px", padding: "12px", marginBottom: "12px", border: `1px solid ${T.cardBorder}` }}>
-        <button onClick={() => fileRef.current?.click()} style={{ width: "100%", background: `linear-gradient(135deg,${T.accent}22,${T.accent2}22)`, border: `2px dashed ${T.accent}`, borderRadius: "12px", padding: "14px", color: T.accent, fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif", marginBottom: "10px" }}>
-          {uploading ? `⏳ ${uploadPct}%` : "📤 رفع ملف (Google Drive)"}
-        </button>
-        <input ref={fileRef} type="file" accept=".pdf,image/*" onChange={handleFile} style={{ display: "none" }} />
-        {uploading && <div style={{ background: T.inputBg, borderRadius: "8px", height: "6px", overflow: "hidden", marginBottom: "10px" }}><div style={{ height: "100%", width: `${uploadPct}%`, background: T.accent }} /></div>}
         <input value={form.teacher} onChange={e => setForm(f => ({ ...f, teacher: e.target.value }))} placeholder="اسم المدرس (اختياري)" style={inp} />
         <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="العنوان *" style={inp} />
-        <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="أو أدخل رابطاً" style={inp} />
+        <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="رابط الملف" style={inp} />
         <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف (اختياري)" style={inp} />
         <button onClick={async () => { if (!form.title || !form.url) return; await save([...items, { ...form }]); setForm({ title: "", url: "", description: "", teacher: "", type: "link" }); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>+ إضافة</button>
       </div>
-      <Modal open={showDriveLinkModal} title="أدخل رابط Google Drive" onClose={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} footer={(
-        <>
-          <button onClick={() => { setShowDriveLinkModal(false); setPendingUploadFile(null); setUploading(false); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
-          <button onClick={handleDriveLinkSubmit} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
-        </>
-      )}>
-        <p style={{ margin: 0, color: T.subtext, marginBottom: "12px" }}>{pendingUploadFile ? `حدد الرابط للملف: ${pendingUploadFile.name}` : "حدد ملفاً أولاً."}</p>
-        <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="رابط Google Drive" style={inp} />
-      </Modal>
       {items.length > 0 && (
         <div>
           <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>اسحب ↕ لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف</p>
