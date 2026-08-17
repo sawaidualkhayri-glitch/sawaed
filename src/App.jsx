@@ -334,7 +334,7 @@ async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"]) {
   // Try to fetch the resource and ensure it's binary (not an HTML fallback page).
   let response;
   try {
-    response = await fetch(safeUrl, { mode: "cors" });
+    response = await fetch(safeUrl, { mode: "cors", cache: "no-store" });
   } catch (err) {
     throw new Error("NETWORK_ERROR:" + (err?.message || err));
   }
@@ -2282,10 +2282,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
     (typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/")) ||
     isImageUrl(url) ||
     isImageUrl(title) ||
-    (savedBlob?.type && savedBlob.type.toLowerCase().startsWith("image/")) ||
-    (typeof localUrl === "string" && localUrl.startsWith("blob:")) ||
-    Boolean(localUrl) ||
-    isSavedOffline
+    (savedBlob?.type && savedBlob.type.toLowerCase().startsWith("image/"))
   );
   const imageSrc = localUrl || viewUrl;
 
@@ -2349,6 +2346,7 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
             style={{ flex: 1, border: "none", width: "100%", height: "100%" }}
             title={title || "PDF Document"}
             allow="autoplay; fullscreen"
+            sandbox="allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
           />
         </div>
       ) : (
@@ -2368,9 +2366,6 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
         ) : (
           <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', background: '#111', minHeight: 0, minWidth: 0 }}>
             <iframe src={viewUrl} title={title || "file-viewer"} style={{ flex: 1, width: "100%", height: '100%', border: "none", background: "#111" }} sandbox="allow-scripts allow-same-origin allow-popups allow-forms" />
-            <div style={{ position: 'absolute', right: 12, top: 12 }}>
-              <button onClick={() => window.open(getDownloadUrl(url), '_blank')} style={{ background: T.accent, color: '#fff', border: 'none', padding: '6px 10px', borderRadius: 6 }}>فتح في تبويب جديد</button>
-            </div>
           </div>
         )
       )}
@@ -2857,23 +2852,40 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
 
     // دالة fetch مع تتبع تقدم
     const fetchWithProgress = async (fetchUrl, progressCallback) => {
-      const resp = await fetch(fetchUrl, { mode: "cors" });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const contentType = (resp.headers.get("Content-Type") || "").toLowerCase();
-      const isAllowed = contentType.includes("pdf") || contentType.includes("image") || contentType.includes("octet-stream");
-      if (!isAllowed) throw new Error("Unsupported content type: " + contentType);
-      const total = parseInt(resp.headers.get("Content-Length") || "0");
-      const reader = resp.body.getReader();
-      const chunks = [];
-      let received = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (total > 0) progressCallback(Math.round((received / total) * 85));
+      const controller = new AbortController();
+      const timeoutMs = 30000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const resp = await fetch(fetchUrl, { mode: "cors", cache: "no-store", signal: controller.signal });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const contentType = (resp.headers.get("Content-Type") || "").toLowerCase();
+        const isAllowed = contentType.includes("pdf") || contentType.includes("image") || contentType.includes("octet-stream");
+        if (!isAllowed) throw new Error("Unsupported content type: " + contentType);
+
+        const total = parseInt(resp.headers.get("Content-Length") || "0");
+        const reader = resp.body?.getReader();
+        if (!reader) throw new Error("Response body stream unavailable");
+
+        const chunks = [];
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (total > 0) progressCallback(Math.round((received / total) * 85));
+        }
+
+        return new Blob(chunks, { type: resp.headers.get("Content-Type") || "application/pdf" });
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          throw new Error("STREAM_TIMEOUT: download timed out while reading response stream");
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeoutId);
       }
-      return new Blob(chunks, { type: resp.headers.get("Content-Type") || "application/pdf" });
     };
 
     const saveBlob = async (blob) => {
@@ -3231,16 +3243,24 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   };
 
   const handleFoundationOpen = async (item) => {
-    const fileId = getOfflineItemId(item);
-    if (savedIds.has(fileId)) {
-      const saved = await idbGetFile(fileId);
-      if (saved?.blob && saved.blob.size > 0) {
-        const blobUrl = URL.createObjectURL(saved.blob);
-        setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: saved.type || getFileMimeType(item, saved.blob) });
-        return;
-      }
-    }
+    // Online mode - open via network/proxy
     setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) });
+  };
+
+  const handleFoundationOpenOffline = async (item) => {
+    // Offline mode - open ONLY from IndexedDB, no network fallback
+    const fileId = getOfflineItemId(item);
+    const saved = await idbGetFile(fileId);
+    if (saved?.blob && saved.blob.size > 0) {
+      const blobUrl = URL.createObjectURL(saved.blob);
+      // Prioritize blob's actual type from Content-Type header, then metadata type, then fallback to guessing from item
+      const effectiveMimeType = saved.blob.type || saved.type || getFileMimeType(item, saved.blob) || "application/pdf";
+      setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: effectiveMimeType });
+      return;
+    }
+    // File not found - show error notification
+    setDlProgress(p => ({ ...p, [fileId]: "offline_missing" }));
+    setTimeout(() => setDlProgress(p => { const n = { ...p }; delete n[fileId]; return n; }), 5000);
   };
 
   if (viewerData) return <FileViewer url={viewerData.url} title={viewerData.title} T={T} isBlobDirect={viewerData.isBlob} mimeType={viewerData.mimeType || "application/pdf"} onClose={() => { if (viewerData.isBlob) URL.revokeObjectURL(viewerData.url); setViewerData(null); }} onStatusChange={(fileId, isDownloaded) => { if (isDownloaded) setSavedIds(s => new Set([...s, fileId])); else setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} />;
@@ -3309,7 +3329,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
                             <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
                               🌐 أونلاين
                             </button>
-                            <button onClick={() => handleFoundationSave(item)} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                            <button onClick={() => isOfflineSaved ? handleFoundationOpenOffline(item) : handleFoundationSave(item)} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
                               {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ للمعاينة أوفلاين"}
                             </button>
                             {isOfflineSaved && (
@@ -3322,6 +3342,8 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
                             </button>
                           </>
                         )}
+                        {prog === "offline_missing" && <span style={{ fontSize: "12px", color: "#dc2626", fontWeight: "600" }}>⚠️ الملف غير محفوظ أوفلاين</span>}
+                        {prog === "error" && <span style={{ fontSize: "12px", color: "#dc2626", fontWeight: "600" }}>❌ خطأ في الحفظ</span>}
                         {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳</span>}
                       </div>
                     </div>

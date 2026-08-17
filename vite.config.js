@@ -9,6 +9,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'inline', // إدراج كود التشغيل تلقائياً لحل مشكلة التجميع
+      includeAssets: ['pdf.worker.min.js', 'icon-192.png', 'icon-512.png'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3,pdf}'], 
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 

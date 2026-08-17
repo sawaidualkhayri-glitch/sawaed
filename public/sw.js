@@ -1,9 +1,9 @@
 // ============================================================
-// SERVICE WORKER — سواعد الخير PWA (v3)
+// SERVICE WORKER — سواعد الخير PWA (v5)
 // ============================================================
 
-const CACHE_NAME = "sawaed-files-v3";
-const SHELL_CACHE = "sawaed-shell-v3";
+const CACHE_NAME = "sawaed-files-v5";
+const SHELL_CACHE = "sawaed-shell-v5";
 
 // ملفات الشل الأساسية
 const SHELL_ASSETS = [
@@ -11,7 +11,8 @@ const SHELL_ASSETS = [
   "/index.html",
   "/manifest.json",
   "/icon-192.png",
-  "/icon-512.png"
+  "/icon-512.png",
+  "/pdf.worker.min.js"
 ];
 
 // 1. INSTALL - حفظ ملفات الشل الأساسية
@@ -45,13 +46,24 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Pass through proxy / Cloudflare / API requests directly to the network.
+  // This avoids service worker lockups and Pending fetch states on worker requests.
+  if (
+    url.hostname.includes("workers.dev") ||
+    url.searchParams.has("fileId") ||
+    url.hostname.includes("sawaed.hamodemsg.workers.dev")
+  ) {
+    event.respondWith(fetch(request, { cache: "no-store" }).catch(() => new Response("{}", { status: 503 })));
+    return;
+  }
+
   // استثناء خدمات Firebase و EmailJS من الكاش
   if (
     url.hostname.includes("firestore.googleapis.com") ||
     url.hostname.includes("api.emailjs.com") ||
     url.hostname.includes("identitytoolkit.googleapis.com")
   ) {
-    event.respondWith(fetch(request).catch(() => new Response("{}", { status: 503 })));
+    event.respondWith(fetch(request, { cache: "no-store" }).catch(() => new Response("{}", { status: 503 })));
     return;
   }
 

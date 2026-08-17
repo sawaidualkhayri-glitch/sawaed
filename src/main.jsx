@@ -8,6 +8,12 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './AuthContext.jsx'
 
+if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    return Promise.all(registrations.map((reg) => reg.unregister()));
+  }).catch(() => {});
+}
+
   /* --- START SUBSECTION: React DOM Tree Initialization --- */
   createRoot(document.getElementById('root')).render(
     <StrictMode>
