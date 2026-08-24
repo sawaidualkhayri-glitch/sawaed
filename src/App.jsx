@@ -145,6 +145,15 @@ function extractDriveId(url) {
   return null;
 }
 
+function extractDriveFolderId(inputUrl) {
+  if (!inputUrl || typeof inputUrl !== "string") return null;
+  const value = inputUrl.trim();
+  const match = value.match(/\/drive(?:\/u\/\d+)?\/folders\/([a-zA-Z0-9_-]+)/i);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{25,}$/.test(value)) return value;
+  return null;
+}
+
 // رابط Cloudflare Worker للـ proxy — يحل مشكلة CORS بشكل نهائي عند التحميل داخل التطبيق
 // أقصى عرض للتطبيق — يبقيه بشكل بطاقة أنيقة متوسّطة على الشاشات الكبيرة (لابتوب/كمبيوتر)
 // بدلاً من التمدد حافة لحافة أو البقاء بعرض هاتف ثابت
@@ -5666,6 +5675,10 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [newFileTitle, setNewFileTitle] = useState("");
   const [newFileUrl, setNewFileUrl] = useState("");
   const [newFileType, setNewFileType] = useState("link");
+  const [showDriveFolderModal, setShowDriveFolderModal] = useState(false);
+  const [driveFolderName, setDriveFolderName] = useState("");
+  const [driveFolderUrl, setDriveFolderUrl] = useState("");
+  const [isImportingDriveFolder, setIsImportingDriveFolder] = useState(false);
 
   const sectionsList = config.subjectSections || [
     "الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات",
@@ -5925,6 +5938,75 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     }
   };
 
+  const resetDriveFolderModal = () => {
+    setShowDriveFolderModal(false);
+    setDriveFolderName("");
+    setDriveFolderUrl("");
+  };
+
+  const importDriveFolder = async () => {
+    const folderId = extractDriveFolderId(driveFolderUrl);
+    if (!folderId) {
+      alert("رابط أو ID المجلد غير صحيح");
+      return;
+    }
+
+    setIsImportingDriveFolder(true);
+    try {
+      const workerBaseUrl = (import.meta.env.VITE_CLOUDFLARE_WORKER_BASE_URL || cloudflareWorkerBaseUrl)
+        .trim()
+        .replace(/\/+$/, "");
+      const response = await fetch(`${workerBaseUrl}/list-folder?folderId=${encodeURIComponent(folderId)}`);
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error("لم يتمكن الخادم من إرجاع بيانات صحيحة");
+      }
+
+      if (!response.ok || !payload?.success || !Array.isArray(payload.files)) {
+        throw new Error(payload?.error || "تعذر قراءة المجلد");
+      }
+
+      const mappedFiles = payload.files
+        .filter(file => file?.id && file?.name)
+        .map(file => ({
+          id: createItemId("file"),
+          type: file.mimeType?.includes("pdf")
+            ? "pdf"
+            : file.mimeType?.includes("image")
+              ? "image"
+              : "link",
+          name: file.name,
+          title: file.name,
+          url: `https://drive.google.com/file/d/${file.id}/view`,
+          description: "",
+          teacher: "",
+          addedAt: Date.now()
+        }));
+
+      if (mappedFiles.length === 0) {
+        throw new Error("المجلد لا يحتوي على ملفات قابلة للاستيراد");
+      }
+
+      const newFolder = {
+        id: createItemId("folder"),
+        type: "folder",
+        name: driveFolderName.trim(),
+        children: mappedFiles
+      };
+
+      await saveFolderData([...folderData, newFolder]);
+      resetDriveFolderModal();
+      alert("تم استيراد المجلد بنجاح!");
+    } catch (error) {
+      console.error("Failed to import Google Drive folder:", error);
+      alert("تعذر استيراد المجلد. تأكد من أن المجلد مضبوط على Anyone with the link can view وأن الرابط صحيح.");
+    } finally {
+      setIsImportingDriveFolder(false);
+    }
+  };
+
   const deleteItem = async (itemId) => {
     const newData = removeItemFromTree(folderData, itemId);
     setFolderData(newData);
@@ -6042,6 +6124,9 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             <button onClick={() => setShowAddFolderModal(true)} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
               ➕ مجلد جديد
             </button>
+            <button onClick={() => setShowDriveFolderModal(true)} style={{ flex: 1, background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
+              📁 مجلد من Drive
+            </button>
             <button onClick={() => setShowAddFileModal(true)} style={{ flex: 1, background: T.accent2, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
               📄 ملف جديد
             </button>
@@ -6077,6 +6162,18 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
               <option value="image">image</option>
               <option value="link">link</option>
             </select>
+          </Modal>
+
+          <Modal open={showDriveFolderModal} title="استيراد مجلد من Google Drive" onClose={resetDriveFolderModal} footer={(
+            <>
+              <button onClick={resetDriveFolderModal} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+              <button onClick={importDriveFolder} disabled={isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isImportingDriveFolder ? "not-allowed" : "pointer", opacity: isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim() ? 0.6 : 1 }}>
+                {isImportingDriveFolder ? "جاري الاستيراد..." : "استيراد وحفظ"}
+              </button>
+            </>
+          )}>
+            <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
+            <input value={driveFolderUrl} onChange={e => setDriveFolderUrl(e.target.value)} placeholder="رابط أو ID مجلد Google Drive" style={inp} />
           </Modal>
         </>
       )}
