@@ -1898,7 +1898,6 @@ function OnboardingPage({ config, T, darkMode, currentUser, updateUser, onComple
             <option value="">اختر فرعك</option>
             {config.branches?.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
-          <input value={stream} onChange={e => { setStream(e.target.value); setErr(""); }} placeholder="الشعبة (علمي/أدبي)" style={inp} />
           <button onClick={handleSave} disabled={loading || !grade || !(stream || branch)} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
             {loading ? "⏳ جاري الحفظ..." : "✅ حفظ وابدأ"}
           </button>
