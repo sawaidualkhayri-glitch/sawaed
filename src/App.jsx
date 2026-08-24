@@ -2420,6 +2420,9 @@ function SubjectPage({ config, saveConfig, T, darkMode, currentUser, updateUser,
       setSelectedSemester(savedSemester);
     } else if (isGrade11) {
       setSelectedSemester("فصل أول");
+    } else {
+      // For Tawjihi (ثاني عشر) and other grades: use single unified semester
+      setSelectedSemester("فصل واحد");
     }
   }, []);
 
