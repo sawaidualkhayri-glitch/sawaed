@@ -222,11 +222,24 @@ function getOfflineItemId(item) {
 }
 
 function getFileMimeType(resource = {}, blob) {
-  if (blob?.type) return blob.type;
+  // Priority 1: Use blob's actual Content-Type from server response
+  if (blob?.type && blob.type.trim()) return blob.type;
+  
   const type = (resource.type || "").toLowerCase();
   const url = (resource.url || "").toLowerCase();
-  if (type.includes("image") || /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/.test(url)) return "image/*";
+  
+  // Priority 2: Check resource type and URL for detection
+  if (type.includes("image") || /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/.test(url)) {
+    // Return proper MIME type based on extension
+    if (url.includes(".png")) return "image/png";
+    if (url.match(/\.jpe?g/)) return "image/jpeg";
+    if (url.includes(".webp")) return "image/webp";
+    if (url.includes(".gif")) return "image/gif";
+    if (url.includes(".svg")) return "image/svg+xml";
+    return "image/png";
+  }
   if (type.includes("pdf") || url.includes(".pdf")) return "application/pdf";
+  
   return "application/octet-stream";
 }
 
@@ -2843,7 +2856,9 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       const saved = await idbGetFile(fileId);
       if (saved?.blob && saved.blob.size > 500 && !saved.isFallback) {
         const blobUrl = URL.createObjectURL(saved.blob);
-        setViewerData({ url: blobUrl, title: resource.title, isBlob: true, mimeType: saved.type || getFileMimeType(resource) });
+        // Priority: blob.type > saved metadata type > guessed
+        const effectiveMimeType = saved.blob.type || saved.type || getFileMimeType(resource, saved.blob);
+        setViewerData({ url: blobUrl, title: resource.title, isBlob: true, mimeType: effectiveMimeType });
         return;
       }
     }
@@ -2890,10 +2905,12 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
 
     const saveBlob = async (blob) => {
       if (!blob || blob.size < 500) throw new Error("blob فارغ");
+      // Priority: blob's actual type > resource type > fallback to pdf
+      const effectiveMimeType = blob.type || resource.type || "application/pdf";
       await idbSaveFile(fileId, blob, {
         title: resource.title,
         description: resource.description || "",
-        type: resource.type || "pdf",
+        type: effectiveMimeType,
         url: resource.url,
         sourceItemId: resource.id || null,
         sourceUrl: resource.url,
@@ -3048,7 +3065,9 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
           const saved = await idbGetFile(fileId);
           if (saved?.blob && saved.blob.size > 0) {
             const blobUrl = URL.createObjectURL(saved.blob);
-            setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: saved.type || getFileMimeType(item, saved.blob), id: item.id });
+            // Priority: blob.type (actual Content-Type) > saved metadata type > guessed
+            const effectiveMimeType = saved.blob.type || saved.type || getFileMimeType(item, saved.blob);
+            setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: effectiveMimeType, id: item.id });
             return;
           }
         }
@@ -3224,11 +3243,13 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
       if (!resp.ok) throw new Error("fetch failed");
       const blob = await resp.blob();
       if (!blob || blob.size < 500) throw new Error("empty blob");
+      // Priority: blob.type (from Content-Type header) > item.type > guessed from item & blob
+      const effectiveMimeType = blob.type || item.type || getFileMimeType(item, blob);
       await idbSaveFile(fileId, blob, {
         title: item.title,
         description: item.description || "",
         url: item.url,
-        type: item.type || getFileMimeType(item),
+        type: effectiveMimeType,
         sourceItemId: item.id || null,
         sourceUrl: item.url,
         isFallback: false,
@@ -3243,8 +3264,36 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   };
 
   const handleFoundationOpen = async (item) => {
-    // Online mode - open via network/proxy
-    setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item) });
+    // Online mode with offline fallback - check IndexedDB first
+    const fileId = getOfflineItemId(item);
+    
+    try {
+      // 1. Check if an offline version is stored in IndexedDB
+      const savedRecord = await idbGetFile(fileId);
+      
+      if (savedRecord?.blob && savedRecord.blob.size > 0) {
+        const blobUrl = URL.createObjectURL(savedRecord.blob);
+        // 2. Open using the local offline blob instead of online URL
+        setViewerData({
+          url: blobUrl,
+          title: item.title,
+          mimeType: savedRecord.blob.type || savedRecord.type || getFileMimeType(item, savedRecord.blob),
+          id: item.id,
+          isBlob: true
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed to check offline fallback for foundation online button:", err);
+    }
+
+    // 3. Original Online Fallback (If not saved offline)
+    setViewerData({
+      url: item.url,
+      title: item.title,
+      mimeType: getFileMimeType(item),
+      id: item.id
+    });
   };
 
   const handleFoundationOpenOffline = async (item) => {
@@ -3253,7 +3302,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
     const saved = await idbGetFile(fileId);
     if (saved?.blob && saved.blob.size > 0) {
       const blobUrl = URL.createObjectURL(saved.blob);
-      // Prioritize blob's actual type from Content-Type header, then metadata type, then fallback to guessing from item
+      // Priority: blob's actual type > metadata type > guessed from item & blob > fallback to PDF
       const effectiveMimeType = saved.blob.type || saved.type || getFileMimeType(item, saved.blob) || "application/pdf";
       setViewerData({ url: blobUrl, title: item.title, isBlob: true, mimeType: effectiveMimeType });
       return;
