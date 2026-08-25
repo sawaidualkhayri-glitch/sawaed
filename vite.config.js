@@ -19,6 +19,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3,pdf}'], 
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 
         navigateFallbackDenylist: [/^\/pdf\.worker\.min\.js$/],
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
       },
       manifest: {
         name: 'سواعد الخير التعليمية',

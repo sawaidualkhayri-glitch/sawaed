@@ -2,8 +2,8 @@
 // SERVICE WORKER — سواعد الخير PWA (v5)
 // ============================================================
 
-const CACHE_NAME = "sawaed-files-v5";
-const SHELL_CACHE = "sawaed-shell-v5";
+const CACHE_NAME = "sawaed-files-v6";
+const SHELL_CACHE = "sawaed-shell-v6";
 
 // ملفات الشل الأساسية
 const SHELL_ASSETS = [
@@ -30,15 +30,12 @@ self.addEventListener("install", (event) => {
 // 2. ACTIVATE - تنظيف الكاشات القديمة تلقائياً
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((k) => k !== CACHE_NAME && k !== SHELL_CACHE)
-          .map((k) => caches.delete(k))
-      )
-    )
+    clients.claim().then(() => caches.keys().then((keys) =>
+      Promise.all(keys
+        .filter((k) => k !== CACHE_NAME && k !== SHELL_CACHE)
+        .map((k) => caches.delete(k)))
+    ))
   );
-  self.clients.claim();
 });
 
 // 3. FETCH - اعتراض وتوجيه الطلبات

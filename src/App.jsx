@@ -1076,6 +1076,8 @@ export default function App() {
   const [page, setPage] = useState("loading");
   const [notificationToast, setNotificationToast] = useState(null);
   const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const pendingWorkerRef = useRef(null);
   const { currentUser, authLoading, logout: authLogout, updateUserProfile, needsOnboarding: authNeedsOnboarding } = useAuth();
   const role = normalizeUserRole(currentUser?.role || "user");
   const isFullAdmin = role === "super_admin";
@@ -1154,6 +1156,51 @@ export default function App() {
       setShowNotificationPrompt(false);
     }
   }, [currentUser?.uid, currentUser?.email]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return undefined;
+
+    let disposed = false;
+    let registration;
+
+    const watchInstallingWorker = (worker) => {
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (!disposed && worker.state === "installed" && navigator.serviceWorker.controller) {
+          pendingWorkerRef.current = worker;
+          setShowUpdateBanner(true);
+        }
+      });
+    };
+
+    const handleControllerChange = () => {
+      if (pendingWorkerRef.current) window.location.reload();
+    };
+
+    navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
+    navigator.serviceWorker.ready.then((readyRegistration) => {
+      if (disposed) return;
+      registration = readyRegistration;
+      registration.update().catch(() => {});
+      registration.addEventListener("updatefound", () => watchInstallingWorker(registration.installing));
+      watchInstallingWorker(registration.installing);
+    }).catch(() => {});
+
+    return () => {
+      disposed = true;
+      navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
+    };
+  }, []);
+
+  const handleAppUpdate = () => {
+    const worker = pendingWorkerRef.current;
+    setShowUpdateBanner(false);
+    if (worker) {
+      worker.postMessage({ type: "SKIP_WAITING" });
+    } else {
+      window.location.reload();
+    }
+  };
 
   const [subjectNav, setSubjectNav] = useState(null);
   const [folderNav, setFolderNav] = useState(null);
@@ -1595,6 +1642,15 @@ export default function App() {
         <div style={{ position: "fixed", left: "50%", bottom: "92px", transform: "translateX(-50%)", maxWidth: "420px", width: "calc(100% - 24px)", background: "rgba(15, 18, 30, 0.96)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: "14px", padding: "12px 14px", boxShadow: "0 18px 32px rgba(0,0,0,0.28)", zIndex: 99998, color: "#fff" }}>
           <div style={{ fontWeight: "800", marginBottom: "4px", fontSize: "13px" }}>{notificationToast.title}</div>
           <div style={{ fontSize: "12px", color: "#dfe3ff", lineHeight: 1.5 }}>{notificationToast.body}</div>
+        </div>
+      )}
+
+      {showUpdateBanner && (
+        <div style={{ position: "fixed", bottom: "20px", right: "20px", left: "20px", maxWidth: "400px", margin: "0 auto", background: "linear-gradient(135deg,#1e1e2f,#2d2d44)", color: "#fff", padding: "12px 18px", borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", zIndex: 9999, border: "1px solid rgba(255,255,255,0.1)", fontFamily: "'Cairo',sans-serif" }}>
+          <span style={{ fontSize: "13px" }}>🚀 يتوفر تحديث جديد للموقع</span>
+          <button onClick={handleAppUpdate} style={{ background: "#6c5ce7", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 14px", cursor: "pointer", fontWeight: "bold", fontSize: "12px", whiteSpace: "nowrap" }}>
+            تحديث الآن
+          </button>
         </div>
       )}
 
