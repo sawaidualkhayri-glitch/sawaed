@@ -2855,6 +2855,20 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
 
   // state لتتبع التقدم لكل ملف: { fileId: 0-100 | "saving" | "done" | "error" }
   const [dlProgress, setDlProgress] = useState({});
+  const [downloadingIds, setDownloadingIds] = useState({});
+
+  const handleSaveToDevice = async (item) => {
+    const key = item?.id || item?.url;
+    if (!key || downloadingIds[key]) return;
+    setDownloadingIds(previous => ({ ...previous, [key]: true }));
+    try {
+      await downloadItemToDevice(item);
+    } catch (err) {
+      console.error("Error downloading file to device:", err);
+    } finally {
+      setDownloadingIds(previous => ({ ...previous, [key]: false }));
+    }
+  };
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   // downloadInApp v3 — 4 مسارات للحفظ الأوفلاين
@@ -3086,7 +3100,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       };
 
       return (
-        <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginBottom: "10px", backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "100%" }}>
+        <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginBottom: "10px", backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "100%", boxSizing: "border-box", maxWidth: "100%", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: "24px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
             <div style={{ minWidth: 0, overflow: "hidden" }}>
@@ -3095,7 +3109,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-start", paddingLeft: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-start", paddingLeft: "12px", flexShrink: 0, minWidth: 0 }}>
             {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ {prog}%</span>}
             {item.url && !isDownloading && (
               <>
@@ -3120,8 +3134,8 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
                         🗑️
                       </button>
                     )}
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); downloadItemToDevice(item); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
-                      ⬇️ حفظ للجهاز
+                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveToDevice(item); }} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap" }}>
+                      {downloadingIds[item.id || item.url] ? "⏳ جاري التحميل..." : "💾 حفظ للجهاز"}
                     </button>
                   </>
                 )}
@@ -3230,6 +3244,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   const [viewerData, setViewerData] = useState(null);
   const [savedIds, setSavedIds] = useState(new Set());
   const [dlProgress, setDlProgress] = useState({});
+  const [downloadingIds, setDownloadingIds] = useState({});
 
   useEffect(() => {
     idbGetAllFiles().then(files => setSavedIds(new Set(files.map(f => f.id))));
@@ -3271,6 +3286,19 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
       console.warn("Foundation save failed:", err);
       setDlProgress(p => ({ ...p, [fileId]: "error" }));
       setTimeout(() => setDlProgress(p => { const n = { ...p }; delete n[fileId]; return n; }), 5000);
+    }
+  };
+
+  const handleFoundationSaveToDevice = async (item) => {
+    const key = item?.id || item?.url;
+    if (!key || downloadingIds[key]) return;
+    setDownloadingIds(previous => ({ ...previous, [key]: true }));
+    try {
+      await downloadItemToDevice(item);
+    } catch (err) {
+      console.error("Error downloading foundation file to device:", err);
+    } finally {
+      setDownloadingIds(previous => ({ ...previous, [key]: false }));
     }
   };
 
@@ -3397,8 +3425,8 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
                                 🗑️
                               </button>
                             )}
-                            <button onClick={() => downloadItemToDevice(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
-                              ⬇️ حفظ للجهاز
+                            <button onClick={() => handleFoundationSaveToDevice(item)} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap" }}>
+                              {downloadingIds[item.id || item.url] ? "⏳ جاري التحميل..." : "💾 حفظ للجهاز"}
                             </button>
                           </>
                         )}
@@ -6338,7 +6366,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
           }
 
           return (
-            <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab" }}>
+            <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, marginLeft: "0px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab", boxSizing: "border-box", maxWidth: "100%", minWidth: 0, gap: "8px" }}>
               <div>📄 {item.title || item.name}</div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={() => openEditItem(item)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>✏️</button>
