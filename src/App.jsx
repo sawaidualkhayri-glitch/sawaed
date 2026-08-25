@@ -145,13 +145,41 @@ function extractDriveId(url) {
   return null;
 }
 
-function extractDriveFolderId(inputUrl) {
-  if (!inputUrl || typeof inputUrl !== "string") return null;
-  const value = inputUrl.trim();
-  const match = value.match(/\/drive(?:\/u\/\d+)?\/folders\/([a-zA-Z0-9_-]+)/i);
-  if (match) return match[1];
-  if (/^[a-zA-Z0-9_-]{25,}$/.test(value)) return value;
+function normalizeDriveFolderInput(input = "") {
+  const value = String(input || "").trim();
+  if (!value) return null;
+
+  if (/^[A-Za-z0-9_-]{10,}$/.test(value)) {
+    return value;
+  }
+
+  const directFolderMatch = value.match(/(?:drive\.google\.com\/)(?:drive(?:\/u\/\d+)?\/)?folders\/([A-Za-z0-9_-]{10,})/i);
+  if (directFolderMatch?.[1]) return directFolderMatch[1];
+
+  const openFolderMatch = value.match(/[?&]id=([A-Za-z0-9_-]{10,})/i);
+  if (openFolderMatch?.[1]) return openFolderMatch[1];
+
+  const fileFolderMatch = value.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/i);
+  if (fileFolderMatch?.[1]) return fileFolderMatch[1];
+
   return null;
+}
+
+function extractDriveFolderId(inputUrl) {
+  return normalizeDriveFolderInput(inputUrl);
+}
+
+function validateRequiredFields(values, requiredKeys = []) {
+  const missing = requiredKeys.filter((key) => {
+    const value = values?.[key];
+    if (typeof value === "string") return !value.trim();
+    return value === undefined || value === null || value === "";
+  });
+
+  return {
+    isValid: missing.length === 0,
+    missing,
+  };
 }
 
 // رابط Cloudflare Worker للـ proxy — يحل مشكلة CORS بشكل نهائي عند التحميل داخل التطبيق
@@ -3279,12 +3307,21 @@ function FoundationPage({ config, T, onSubject }) {
   return (
     <div className="app-shell-fluid" style={{ fontFamily: "'Cairo',sans-serif", direction: "rtl", padding: "20px 0" }}>
       <h2 style={{ color: T.text, fontSize: "20px", fontWeight: "800", margin: "0 0 24px" }}>🏗️ صفحة التأسيس</h2>
-      <div className="subpage-grid" style={{ padding: "0", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "28px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px", width: "100%", maxWidth: "800px", margin: "0 auto", padding: "0 16px", boxSizing: "border-box" }}>
         {config.foundationSubjects?.map(sub => (
-          <button key={sub} onClick={() => onSubject({ subject: sub })} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "24px", padding: "26px 20px", cursor: "pointer", textAlign: "center", backdropFilter: "blur(12px)", boxShadow: T.shadow, minWidth: "150px", width: "180px", display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
-            <div style={{ fontSize: "36px", width: "56px", height: "56px", display: "flex", alignItems: "center", justifyContent: "center" }}>{EMOJI[sub] || "📌"}</div>
-            <div style={{ fontSize: "17px", fontWeight: "700", color: T.text, lineHeight: 1.3 }}>{sub}</div>
-          </button>
+          <div key={sub} role="button" tabIndex={0} onClick={() => onSubject({ subject: sub })} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onSubject({ subject: sub }); }} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", width: "100%", boxSizing: "border-box", gap: "14px", cursor: "pointer", boxShadow: T.shadow, transition: "transform 0.2s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0, flex: 1 }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "12px", background: "rgba(255,255,255,0.05)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}>
+                {EMOJI[sub] || "📖"}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+                <span style={{ display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "15px", fontWeight: "700", color: T.text, textAlign: "right" }}>
+                  {sub}
+                </span>
+              </div>
+            </div>
+            <span style={{ color: T.subtext, fontSize: "18px", paddingRight: "4px", flexShrink: 0 }}>‹</span>
+          </div>
         ))}
       </div>
     </div>
@@ -5237,6 +5274,8 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
 
   const foundKey = normalizeFoundKey({ subject: selSub, branch: selBranch, type: selType, sub: selArea });
   const [items, setItems] = useState([]);
+  const requiredFormCheck = validateRequiredFields(form, ["title", "url"]);
+  const validDriveFolder = Boolean(driveFolderName.trim()) && Boolean(normalizeDriveFolderInput(driveFolderUrl));
 
   useEffect(() => { const raw = config[foundKey]; setItems(raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []); }, [foundKey]);
 
@@ -5377,13 +5416,14 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
           </button>
           <button
             onClick={async () => {
-              const title = (form.title || "").trim();
-              const url = (form.url || "").trim();
-
-              if (!title || !url) {
+              const validation = validateRequiredFields(form, ["title", "url"]);
+              if (!validation.isValid) {
                 alert("يرجى كتابة العنوان ورابط الملف أولاً!");
                 return;
               }
+
+              const title = (form.title || "").trim();
+              const url = (form.url || "").trim();
 
               const newItem = {
                 ...form,
@@ -5400,6 +5440,7 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
               setForm({ title: "", url: "", description: "", teacher: "", type: "link" });
               alert("تمت إضافة العنصر بنجاح!");
             }}
+            disabled={!requiredFormCheck.isValid}
             style={{
               flex: 1,
               background: `linear-gradient(135deg,${T.accent},${T.accent2})`,
@@ -5407,7 +5448,8 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
               border: "none",
               borderRadius: "10px",
               padding: "10px 18px",
-              cursor: "pointer",
+              cursor: requiredFormCheck.isValid ? "pointer" : "not-allowed",
+              opacity: requiredFormCheck.isValid ? 1 : 0.6,
               fontFamily: "'Cairo',sans-serif",
               fontWeight: "700"
             }}
@@ -5438,7 +5480,7 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
       <Modal open={showDriveFolderModal} title="استيراد مجلد من Google Drive" onClose={resetDriveFolderModal} footer={(
         <>
           <button onClick={resetDriveFolderModal} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
-          <button onClick={importDriveFolder} disabled={isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isImportingDriveFolder ? "not-allowed" : "pointer", opacity: isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim() ? 0.6 : 1 }}>
+          <button onClick={importDriveFolder} disabled={isImportingDriveFolder || !validDriveFolder} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isImportingDriveFolder || !validDriveFolder ? "not-allowed" : "pointer", opacity: isImportingDriveFolder || !validDriveFolder ? 0.6 : 1 }}>
             {isImportingDriveFolder ? "جاري الاستيراد..." : "استيراد وحفظ"}
           </button>
         </>
