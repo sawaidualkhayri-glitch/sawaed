@@ -4191,6 +4191,21 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
   const dragItem = useRef(null);
   const dragOver = useRef(null);
 
+  const getDisplayName = (item) => {
+    if (!item || typeof item !== "object") return "عنصر";
+    if (typeof item.title === "string" && item.title.trim()) return item.title.trim();
+    if (typeof item.name === "string" && item.name.trim()) return item.name.trim();
+    return "عنصر";
+  };
+
+  const getIcon = (item) => {
+    if (!item || typeof item !== "object") return "🔗";
+    if (item.type === "folder" || item.isFolder) return "📁";
+    if (item.type === "pdf") return "📄";
+    if (item.type === "image") return "🖼️";
+    return "🔗";
+  };
+
   const handleDragStart = (i) => { dragItem.current = i; };
   const handleDragEnter = (i) => { dragOver.current = i; };
   const handleDragEnd = () => {
@@ -4206,12 +4221,29 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
 
   const startEdit = (i) => {
     setEditIdx(i);
-    setEditForm({ ...resources[i] });
+    const item = resources[i] || {};
+    setEditForm({
+      ...item,
+      title: item.title ?? item.name ?? "",
+      name: item.name ?? item.title ?? "",
+      url: item.url ?? "",
+      description: item.description ?? "",
+    });
   };
 
   const saveEdit = () => {
     const copy = [...resources];
-    copy[editIdx] = { ...editForm };
+    const item = { ...copy[editIdx], ...editForm };
+    if (item.type === "folder" || item.isFolder) {
+      const folderName = (editForm.name || editForm.title || "").trim();
+      item.name = folderName || item.name || "مجلد";
+      item.title = item.name;
+    } else {
+      item.title = (editForm.title || "").trim() || item.name || "عنصر";
+      item.url = (editForm.url || "").trim();
+      item.description = (editForm.description || "").trim();
+    }
+    copy[editIdx] = item;
     setResources(copy);
     onSave(copy);
     setEditIdx(null);
@@ -4231,9 +4263,15 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
         <div key={i} draggable onDragStart={() => handleDragStart(i)} onDragEnter={() => handleDragEnter(i)} onDragEnd={handleDragEnd} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", cursor: "grab", userSelect: "none" }}>
           {editIdx === i ? (
             <div>
-              <input value={editForm.title || ""} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} placeholder="العنوان" style={inp} />
-              <input value={editForm.url || ""} onChange={e => setEditForm(f => ({ ...f, url: e.target.value }))} placeholder="الرابط" style={inp} />
-              <input value={editForm.description || ""} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="الوصف" style={inp} />
+              {r.type === "folder" || r.isFolder ? (
+                <input value={editForm.name ?? editForm.title ?? ""} onChange={e => setEditForm(f => ({ ...f, name: e.target.value, title: e.target.value }))} placeholder="اسم المجلد" style={inp} />
+              ) : (
+                <>
+                  <input value={editForm.title || ""} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} placeholder="العنوان" style={inp} />
+                  <input value={editForm.url || ""} onChange={e => setEditForm(f => ({ ...f, url: e.target.value }))} placeholder="الرابط" style={inp} />
+                  <input value={editForm.description || ""} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} placeholder="الوصف" style={inp} />
+                </>
+              )}
               <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                 <button onClick={saveEdit} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "8px", padding: "7px 14px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontSize: "13px" }}>✅ حفظ</button>
                 <button onClick={() => setEditIdx(null)} style={{ background: "transparent", border: `1px solid ${T.cardBorder}`, borderRadius: "8px", padding: "7px 14px", cursor: "pointer", color: T.subtext, fontFamily: "'Cairo',sans-serif", fontSize: "13px" }}>إلغاء</button>
@@ -4242,9 +4280,9 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
           ) : (
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <span style={{ fontSize: "18px", color: T.subtext, cursor: "grab", flexShrink: 0 }}>☰</span>
-              <span style={{ fontSize: "20px", flexShrink: 0 }}>{r.type === "pdf" ? "📄" : r.type === "image" ? "🖼️" : "🔗"}</span>
+              <span style={{ fontSize: "20px", flexShrink: 0 }}>{getIcon(r)}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</p>
+                <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getDisplayName(r)}</p>
                 {r.description && <p style={{ margin: "2px 0 0", fontSize: "11px", color: T.subtext, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.description}</p>}
               </div>
               <button onClick={() => startEdit(i)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px", flexShrink: 0 }}>✏️</button>
@@ -5100,11 +5138,18 @@ function AdminQuotes({ config, saveConfig, T, onBack }) {
 }
 
 function AdminFoundation({ config, saveConfig, T, onBack }) {
+  const [showAddFolderModal, setShowAddFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
   const [selSub, setSelSub] = useState(config.foundationSubjects?.[0] || "");
   const [selBranch, setSelBranch] = useState((config.foundationBranches?.[config.foundationSubjects?.[0]] || [])[0] || "");
   const [selType, setSelType] = useState("electronic");
   const [selArea, setSelArea] = useState((config.foundationTypes?.electronic || [])[0] || "");
   const [form, setForm] = useState({ title: "", url: "", description: "", teacher: "", type: "link" });
+  const [showDriveFolderModal, setShowDriveFolderModal] = useState(false);
+  const [driveFolderName, setDriveFolderName] = useState("");
+  const [driveFolderUrl, setDriveFolderUrl] = useState("");
+  const [isImportingDriveFolder, setIsImportingDriveFolder] = useState(false);
 
   const foundKey = normalizeFoundKey({ subject: selSub, branch: selBranch, type: selType, sub: selArea });
   const [items, setItems] = useState([]);
@@ -5116,10 +5161,100 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
     setItems(newItems);
   };
 
+  const resetDriveFolderModal = () => {
+    setShowDriveFolderModal(false);
+    setDriveFolderName("");
+    setDriveFolderUrl("");
+  };
 
+  const importDriveFolder = async () => {
+    const folderId = extractDriveFolderId(driveFolderUrl);
+    if (!folderId) {
+      alert("رابط أو ID المجلد غير صحيح");
+      return;
+    }
+
+    setIsImportingDriveFolder(true);
+    try {
+      const workerBaseUrl = (import.meta.env.VITE_CLOUDFLARE_WORKER_BASE_URL || cloudflareWorkerBaseUrl || "https://sawaed.hamodemsg.workers.dev")
+        .trim()
+        .replace(/\/+$/, "");
+
+      const response = await fetch(`${workerBaseUrl}/list-folder?folderId=${encodeURIComponent(folderId)}`);
+      let payload = null;
+
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error("لم يتمكن الخادم من إرجاع بيانات صحيحة");
+      }
+
+      if (!response.ok || !payload?.success || !Array.isArray(payload.files)) {
+        throw new Error(payload?.error || "تعذر قراءة المجلد");
+      }
+
+      const mappedFiles = payload.files
+        .filter(file => file && file.id && file.name)
+        .map(file => ({
+          id: `foundation_item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          title: file.name,
+          name: file.name,
+          url: `https://drive.google.com/file/d/${file.id}/view`,
+          type: file.mimeType?.includes("pdf") ? "pdf" : "link",
+          description: "",
+          teacher: "",
+          addedAt: Date.now()
+        }));
+
+      if (mappedFiles.length === 0) {
+        throw new Error("المجلد لا يحتوي على ملفات قابلة للاستيراد");
+      }
+
+      await save([...items, ...mappedFiles]);
+      resetDriveFolderModal();
+      alert("تم استيراد مجلد التأسيس بنجاح!");
+    } catch (error) {
+      console.error("Failed to import foundation Google Drive folder:", error);
+      alert("تعذر استيراد المجلد. تأكد من أن المجلد عام أو أنه يسمح بالوصول عبر الرابط، ثم حاول مرة أخرى.");
+    } finally {
+      setIsImportingDriveFolder(false);
+    }
+  };
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
   const sel = { ...inp };
+
+  const addFoundationFolder = async () => {
+    const name = (newFolderName || "").trim();
+    if (!name) {
+      alert("يرجى إدخال اسم المجلد!");
+      return;
+    }
+
+    setIsAddingFolder(true);
+    try {
+      const newFolderObj = {
+        id: `foundation_folder_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        title: name,
+        name,
+        isFolder: true,
+        items: [],
+        addedAt: Date.now()
+      };
+
+      const updatedItems = [...items, newFolderObj];
+      await save(updatedItems);
+      setItems(updatedItems);
+      setNewFolderName("");
+      setShowAddFolderModal(false);
+      alert("تم إنشاء المجلد بنجاح!");
+    } catch (err) {
+      console.error("Error adding foundation folder:", err);
+      alert("حدث خطأ أثناء إنشاء المجلد");
+    } finally {
+      setIsAddingFolder(false);
+    }
+  };
 
   return (
     <AdminSection title="محتوى التأسيس" icon="🏗️" T={T} onBack={onBack} onSave={() => {}}>
@@ -5139,7 +5274,64 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
         <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="العنوان *" style={inp} />
         <input value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="رابط الملف" style={inp} />
         <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="وصف (اختياري)" style={inp} />
-        <button onClick={async () => { if (!form.title || !form.url) return; await save([...items, { ...form }]); setForm({ title: "", url: "", description: "", teacher: "", type: "link" }); }} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>+ إضافة</button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <button
+            onClick={() => setShowAddFolderModal(true)}
+            style={{
+              flex: 1,
+              background: T.accent,
+              color: "#fff",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              cursor: "pointer",
+              fontFamily: "'Cairo',sans-serif",
+              fontWeight: "700"
+            }}
+          >
+            ➕ مجلد جديد
+          </button>
+          <button
+            onClick={async () => {
+              const title = (form.title || "").trim();
+              const url = (form.url || "").trim();
+
+              if (!title || !url) {
+                alert("يرجى كتابة العنوان ورابط الملف أولاً!");
+                return;
+              }
+
+              const newItem = {
+                ...form,
+                id: `foundation_item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                title,
+                url,
+                description: (form.description || "").trim(),
+                teacher: (form.teacher || "").trim(),
+                type: form.type || "link",
+                addedAt: Date.now()
+              };
+
+              await save([...items, newItem]);
+              setForm({ title: "", url: "", description: "", teacher: "", type: "link" });
+              alert("تمت إضافة العنصر بنجاح!");
+            }}
+            style={{
+              flex: 1,
+              background: `linear-gradient(135deg,${T.accent},${T.accent2})`,
+              color: "#fff",
+              border: "none",
+              borderRadius: "10px",
+              padding: "10px 18px",
+              cursor: "pointer",
+              fontFamily: "'Cairo',sans-serif",
+              fontWeight: "700"
+            }}
+          >
+            + إضافة
+          </button>
+          <button onClick={() => setShowDriveFolderModal(true)} style={{ flex: 1, background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>📁 مجلد من Drive</button>
+        </div>
       </div>
       {items.length > 0 && (
         <div>
@@ -5147,6 +5339,29 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
           <DraggableResourceList resources={items} setResources={setItems} T={T} onSave={save} />
         </div>
       )}
+
+      <Modal open={showAddFolderModal} title="إنشاء مجلد جديد" onClose={() => { setShowAddFolderModal(false); setNewFolderName(""); }} footer={(
+        <>
+          <button onClick={() => { setShowAddFolderModal(false); setNewFolderName(""); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={addFoundationFolder} disabled={isAddingFolder || !newFolderName.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isAddingFolder ? "not-allowed" : "pointer", opacity: isAddingFolder || !newFolderName.trim() ? 0.6 : 1 }}>
+            {isAddingFolder ? "جاري الإنشاء..." : "إنشاء"}
+          </button>
+        </>
+      )}>
+        <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
+      </Modal>
+
+      <Modal open={showDriveFolderModal} title="استيراد مجلد من Google Drive" onClose={resetDriveFolderModal} footer={(
+        <>
+          <button onClick={resetDriveFolderModal} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+          <button onClick={importDriveFolder} disabled={isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: isImportingDriveFolder ? "not-allowed" : "pointer", opacity: isImportingDriveFolder || !driveFolderName.trim() || !driveFolderUrl.trim() ? 0.6 : 1 }}>
+            {isImportingDriveFolder ? "جاري الاستيراد..." : "استيراد وحفظ"}
+          </button>
+        </>
+      )}>
+        <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
+        <input value={driveFolderUrl} onChange={e => setDriveFolderUrl(e.target.value)} placeholder="رابط أو ID مجلد Google Drive" style={inp} />
+      </Modal>
     </AdminSection>
   );
 }
@@ -5679,6 +5894,11 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [driveFolderName, setDriveFolderName] = useState("");
   const [driveFolderUrl, setDriveFolderUrl] = useState("");
   const [isImportingDriveFolder, setIsImportingDriveFolder] = useState(false);
+  const [editItemId, setEditItemId] = useState(null);
+  const [editItemForm, setEditItemForm] = useState({ title: "", url: "", type: "link" });
+  const [expandedFolders, setExpandedFolders] = useState(new Set());
+  const dragItemId = useRef(null);
+  const dragOverItemId = useRef(null);
 
   const sectionsList = config.subjectSections || [
     "الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات",
@@ -5786,6 +6006,31 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     });
   };
 
+  const updateItemInTree = (items, itemId, updater) => items.map(item => {
+    if (!item || typeof item !== "object") return item;
+    if (item.id === itemId) return updater(item);
+    if (item.type === "folder") return { ...item, children: updateItemInTree(item.children || [], itemId, updater) };
+    return item;
+  });
+
+  const reorderItemsAtLevel = (items, parentId, fromId, toId) => {
+    if (parentId === null) {
+      const fromIndex = items.findIndex(item => item?.id === fromId);
+      const toIndex = items.findIndex(item => item?.id === toId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return items;
+      const reordered = [...items];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    }
+    return items.map(item => item?.type === "folder"
+      ? item.id === parentId
+        ? { ...item, children: reorderItemsAtLevel(item.children || [], null, fromId, toId) }
+        : { ...item, children: reorderItemsAtLevel(item.children || [], parentId, fromId, toId) }
+      : item
+    );
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -5886,9 +6131,15 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const selectStyle = { ...inp };
 
   const addFolder = async () => {
-    if (!newFolderName.trim()) return;
+    if (!newFolderName.trim()) {
+      alert("يرجى إدخال اسم المجلد!");
+      return;
+    }
     setIsAddingFolder(true);
-    const newData = [...folderData, { id: createItemId("folder"), type: "folder", name: newFolderName.trim(), children: [] }];
+    const newFolder = { id: createItemId("folder"), type: "folder", name: newFolderName.trim(), children: [] };
+    const newData = targetFolderId
+      ? insertItemIntoTree(folderData, targetFolderId, newFolder)
+      : [...folderData, newFolder];
     try {
       setFolderData(newData);
       await saveFolderData(newData);
@@ -6013,7 +6264,40 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     await saveFolderData(newData);
   };
 
-  const renderItems = (items, depth = 0) => {
+  const openEditItem = (item) => {
+    setEditItemId(item.id);
+    setEditItemForm({
+      title: item.title || item.name || "",
+      url: item.url || "",
+      type: item.type || "link"
+    });
+  };
+
+  const saveEditedItem = async () => {
+    const title = editItemForm.title.trim();
+    if (!title) {
+      alert("يرجى إدخال اسم العنصر!");
+      return;
+    }
+    const newData = updateItemInTree(folderData, editItemId, item => item.type === "folder"
+      ? { ...item, name: title }
+      : { ...item, title, url: editItemForm.url.trim(), type: editItemForm.type }
+    );
+    await saveFolderData(newData);
+    setEditItemId(null);
+  };
+
+  const handleNestedDragEnd = async (parentId) => {
+    const fromId = dragItemId.current;
+    const toId = dragOverItemId.current;
+    dragItemId.current = null;
+    dragOverItemId.current = null;
+    if (!fromId || !toId || fromId === toId) return;
+    const newData = reorderItemsAtLevel(folderData, parentId, fromId, toId);
+    await saveFolderData(newData);
+  };
+
+  const renderItems = (items, depth = 0, parentId = null) => {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {items.map((item) => {
@@ -6021,41 +6305,47 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
 
           if (item.type === "folder") {
             const nestedCount = countNestedItems(item);
+            const isExpanded = expandedFolders.has(item.id);
             return (
-              <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px` }}>
+              <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, cursor: "grab" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-                  <div style={{ flex: 1 }}>
-                    <div>📁 {item.name} ({nestedCount} عنصر)</div>
-                    {item.children?.length > 0 && (
-                      <div style={{ color: T.subtext, fontSize: "12px", marginTop: "4px" }}>
-                        يحتوي على {item.children.length} عنصر فرعي
-                      </div>
-                    )}
-                  </div>
+                  <button onClick={() => setExpandedFolders(current => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })} style={{ flex: 1, textAlign: "right", background: "transparent", border: "none", color: T.text, cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
+                    📁 {item.name || item.title} ({nestedCount} عنصر) {isExpanded ? "▾" : "▸"}
+                  </button>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     <button onClick={() => { setTargetFolderId(item.id); setShowAddFileModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
-                      + إضافة ملف
+                      + ملف جديد
                     </button>
+                    <button onClick={() => { setTargetFolderId(item.id); setShowAddFolderModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                      + مجلد جديد
+                    </button>
+                    <button onClick={() => openEditItem(item)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>✏️</button>
                     <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
                       🗑️ حذف
                     </button>
                   </div>
                 </div>
-                {item.children?.length > 0 && (
+                {isExpanded && item.children?.length > 0 && (
                   <div style={{ marginTop: "8px" }}>
-                    {renderItems(item.children, depth + 1)}
+                    {renderItems(item.children, depth + 1, item.id)}
                   </div>
+                )}
+                {isExpanded && item.children?.length === 0 && (
+                  <p style={{ color: T.subtext, fontSize: "12px", margin: "8px 0 0" }}>المجلد فارغ</p>
                 )}
               </div>
             );
           }
 
           return (
-            <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>📄 {item.title}</div>
-              <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
-                🗑️ حذف
-              </button>
+            <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab" }}>
+              <div>📄 {item.title || item.name}</div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={() => openEditItem(item)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>✏️</button>
+                <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
+                  🗑️ حذف
+                </button>
+              </div>
             </div>
           );
         })}
@@ -6121,7 +6411,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
       ) : (
         <>
           <div style={{ marginTop: "16px", display: "flex", gap: "10px" }}>
-            <button onClick={() => setShowAddFolderModal(true)} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
+            <button onClick={() => { setTargetFolderId(null); setShowAddFolderModal(true); }} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
               ➕ مجلد جديد
             </button>
             <button onClick={() => setShowDriveFolderModal(true)} style={{ flex: 1, background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontWeight: "700", cursor: "pointer" }}>
@@ -6136,7 +6426,10 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             {folderData.length === 0 ? (
               <p style={{ color: T.subtext, textAlign: "center", padding: "40px 0" }}>لا توجد مجلدات بعد. أضف مجلدًا أو ملفًا.</p>
             ) : (
-              <div>{renderItems(folderData)}</div>
+              <div>
+                <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>اسحب ↕ لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف • ➕ لإضافة ملف أو مجلد داخل المجلد</p>
+                {renderItems(folderData)}
+              </div>
             )}
           </div>
 
@@ -6147,6 +6440,21 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             </>
           )}>
             <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="اسم المجلد" style={inp} />
+          </Modal>
+
+          <Modal open={Boolean(editItemId)} title="تعديل العنصر" onClose={() => setEditItemId(null)} footer={(
+            <>
+              <button onClick={() => setEditItemId(null)} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>إلغاء</button>
+              <button onClick={saveEditedItem} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 16px", cursor: "pointer" }}>حفظ</button>
+            </>
+          )}>
+            <input value={editItemForm.title} onChange={e => setEditItemForm(form => ({ ...form, title: e.target.value }))} placeholder="العنوان أو اسم المجلد" style={inp} />
+            <input value={editItemForm.url} onChange={e => setEditItemForm(form => ({ ...form, url: e.target.value }))} placeholder="الرابط" style={inp} />
+            <select value={editItemForm.type} onChange={e => setEditItemForm(form => ({ ...form, type: e.target.value }))} style={inp}>
+              <option value="pdf">pdf</option>
+              <option value="image">image</option>
+              <option value="link">link</option>
+            </select>
           </Modal>
 
           <Modal open={showAddFileModal} title="إضافة ملف جديد" onClose={resetFileModal} footer={(
