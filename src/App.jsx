@@ -3256,46 +3256,49 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       const isExpanded = expandedFolderIds.has(folderId);
 
       return (
-        <div key={folderId} style={{ marginRight: depth * 16, marginTop: "8px", marginLeft: "12px", marginRight: `calc(${depth * 16}px + 12px)`, width: "calc(100% - 24px)", boxSizing: "border-box" }}>
+        <div key={folderId} style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", paddingLeft: "16px", paddingRight: `${16 + depth * 16}px` }}>
           <div
             style={{
               background: T.card,
               border: `1px solid ${T.cardBorder}`,
               borderRadius: "16px",
-              padding: "12px 14px",
+              padding: isMobile ? "12px" : "12px 14px",
               display: "flex",
-              alignItems: "center",
+              alignItems: isMobile ? "stretch" : "center",
               justifyContent: "space-between",
               gap: "10px",
-              backdropFilter: "blur(10px)"
+              backdropFilter: "blur(10px)",
+              flexDirection: isMobile ? "column" : "row",
+              width: "100%",
+              boxSizing: "border-box"
             }}
           >
             <div
-              style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1, cursor: "pointer" }}
+              style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1, cursor: "pointer", width: isMobile ? "100%" : "auto", justifyContent: isMobile ? "center" : "flex-start" }}
               onClick={(e) => {
                 if (e.target.closest("button")) return;
                 toggleFolder(folderId);
               }}
             >
-              <span style={{ fontSize: "22px" }}>{isExpanded ? "📂" : "📁"}</span>
-              <span style={{ fontSize: "16px", color: T.accent, fontWeight: "700" }}>{isExpanded ? "▼" : "▶"}</span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <p style={{ margin: 0, color: T.text, fontWeight: "700", fontSize: "14px", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: "22px", flexShrink: 0 }}>{isExpanded ? "📂" : "📁"}</span>
+              <span style={{ fontSize: "16px", color: T.accent, fontWeight: "700", flexShrink: 0 }}>{isExpanded ? "▼" : "▶"}</span>
+              <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+                <p style={{ margin: 0, color: T.text, fontWeight: "700", fontSize: isMobile ? "13px" : "14px", textAlign: isMobile ? "center" : "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: isMobile ? "normal" : "nowrap", wordBreak: isMobile ? "break-word" : "normal" }}>
                   {item.title || item.name || "مجلد"}
                 </p>
               </div>
             </div>
 
             {canEditStructure && editorMode && (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                <button onClick={() => handleDissolveFolder(item.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}66`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap" }}>📂🔓 تفريغ</button>
-                <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px" }}>🗑️</button>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: isMobile ? "center" : "flex-end", width: isMobile ? "100%" : "auto" }}>
+                <button onClick={() => handleDissolveFolder(item.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}66`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>📂🔓 تفريغ</button>
+                <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", flexShrink: 0 }}>🗑️</button>
               </div>
             )}
           </div>
 
           {isExpanded && (
-            <div style={{ marginTop: "8px", paddingRight: `${(depth + 1) * 12}px` }}>
+            <div style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", paddingLeft: "16px", paddingRight: "16px" }}>
               {children.length > 0 ? (
                 children.map((child, childIndex) => renderItem(child, childIndex, depth + 1))
               ) : (
@@ -3329,16 +3332,16 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     };
 
     return (
-      <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginTop: "8px", marginLeft: "12px", marginRight: `calc(${depth * 16}px + 12px)`, backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "calc(100% - 24px)", boxSizing: "border-box", maxWidth: "100%", minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+      <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: isMobile ? "12px" : "10px 18px", marginTop: "8px", backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", minHeight: "54px", gap: isMobile ? "10px" : "12px", width: "100%", boxSizing: "border-box", maxWidth: "100%", minWidth: 0, flexDirection: isMobile ? "column" : "row" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: isMobile ? "unset" : 1, width: isMobile ? "100%" : "auto", overflow: "hidden", justifyContent: isMobile ? "center" : "flex-start" }}>
           <div style={{ fontSize: "24px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
-          <div style={{ minWidth: 0, overflow: "hidden" }}>
-            <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "14px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</p>
-            {item.description && <p style={{ margin: 0, fontSize: "11px", color: T.subtext, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.description}</p>}
+          <div style={{ minWidth: 0, overflow: "hidden", flex: 1, width: "100%" }}>
+            <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: isMobile ? "13px" : "14px", whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.title}</p>
+            {item.description && <p style={{ margin: 0, fontSize: "11px", color: T.subtext, whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.description}</p>}
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-start", paddingLeft: "12px", flexShrink: 0, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: isMobile ? "center" : "flex-start", paddingLeft: isMobile ? 0 : "12px", flexShrink: 0, minWidth: 0, width: isMobile ? "100%" : "auto" }}>
           {isDownloading && <span style={{ fontSize: "12px", color: T.subtext }}>⏳ {prog}%</span>}
           {item.url && !isDownloading && (
             <>
@@ -3350,20 +3353,20 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
                 } else {
                   setViewerData({ url: item.url, title: item.title, mimeType: getFileMimeType(item), id: item.id });
                 }
-              }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+              }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600", flexShrink: 0 }}>
                 🌐 أونلاين
               </button>
               {item.type !== "link" && (
                 <>
-                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOfflineBtn(); }} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700", flexShrink: 0 }}>
                     {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ للمعاينة أوفلاين"}
                   </button>
                   {isOfflineSaved && (
-                    <button onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "7px 10px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                    <button onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "7px 10px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700", flexShrink: 0 }}>
                       🗑️
                     </button>
                   )}
-                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveToDevice(item); }} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap" }}>
+                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSaveToDevice(item); }} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap", flexShrink: 0 }}>
                     {downloadingIds[item.id || item.url] ? "⏳ جاري التحميل..." : "💾 حفظ للجهاز"}
                   </button>
                 </>
@@ -3372,7 +3375,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
           )}
           {prog === "error" && <span style={{ fontSize: "11px", color: "#e55333", fontWeight: "700" }}>⚠️</span>}
           <button onClick={() => toggleStar(item)} style={{ background: "transparent", border: "none", fontSize: "18px", cursor: "pointer", flexShrink: 0 }}>{isStarred(item) ? "⭐" : "☆"}</button>
-          {canEditStructure && editorMode && <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>}
+          {canEditStructure && editorMode && <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>🗑️</button>}
         </div>
       </div>
     );
@@ -3743,7 +3746,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
           </div>
         )}
         {selSub && (
-          <div className="subpage-grid" style={{ padding: "0" }}>
+          <div className="subpage-grid" style={{ padding: "0 16px", width: "100%", boxSizing: "border-box" }}>
             <div style={{ gridColumn: "1 / -1" }}>
               <button onClick={() => setSelSub(null)} style={{ background: "transparent", border: "none", color: T.accent, cursor: "pointer", fontSize: "14px", fontFamily: "'Cairo',sans-serif", marginBottom: "12px" }}>← رجوع</button>
               <h3 style={{ color: T.text, marginBottom: "12px" }}>{selSub}</h3>
@@ -4538,7 +4541,9 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
   const [editForm, setEditForm] = useState({});
   const [dragOverFolderId, setDragOverFolderId] = useState(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState(new Set());
+  const [touchGhost, setTouchGhost] = useState(null);
   const dragItem = useRef(null);
+  const touchDragItem = useRef(null);
 
   const getFolderItems = (item) => {
     if (!item || typeof item !== "object") return [];
@@ -4696,14 +4701,17 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
   };
 
   const handleDropOnFolder = (folderId) => {
-    if (!dragItem.current || !folderId || dragItem.current === folderId) return;
-    const next = moveItemToFolder(resources, dragItem.current, folderId);
+    const activeItemId = dragItem.current || touchDragItem.current;
+    if (!activeItemId || !folderId || activeItemId === folderId) return;
+    const next = moveItemToFolder(resources, activeItemId, folderId);
     if (next !== resources) {
       setResources(next);
       onSave(next);
     }
     dragItem.current = null;
+    touchDragItem.current = null;
     setDragOverFolderId(null);
+    setTouchGhost(null);
   };
 
   const handleDropOnItem = (parentFolderId, targetId) => {
@@ -4727,6 +4735,24 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
     });
   };
 
+  const finishTouchDrag = (event) => {
+    const touch = event.changedTouches?.[0];
+    if (!touch) return;
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    const folderTarget = target?.closest("[data-folder-id]");
+    if (folderTarget) {
+      handleDropOnFolder(folderTarget.dataset.folderId);
+    } else {
+      const itemTarget = target?.closest("[data-item-id]");
+      if (itemTarget && itemTarget.dataset.itemId !== (touchDragItem.current || "")) {
+        handleDropOnItem(parentFolderId, itemTarget.dataset.itemId);
+      }
+    }
+    dragItem.current = null;
+    touchDragItem.current = null;
+    setTouchGhost(null);
+  };
+
   const renderList = (list, depth = 0, parentFolderId = null) => (
     <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginRight: depth ? `${depth * 12}px` : 0 }}>
       {list.map((r, i) => {
@@ -4737,7 +4763,41 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
         const isExpanded = isFolder && expandedFolderIds.has(itemId);
 
         return (
-          <div key={itemId} draggable onDragStart={() => { dragItem.current = itemId; }} onDragEnter={() => { if (isFolder) setDragOverFolderId(itemId); }} onDragOver={(e) => { e.preventDefault(); if (isFolder) setDragOverFolderId(itemId); }} onDragEnd={() => { dragItem.current = null; setDragOverFolderId(null); }} onDrop={(e) => { e.preventDefault(); if (isFolder) { handleDropOnFolder(itemId); return; } handleDropOnItem(parentFolderId, itemId); }} style={{ background: T.card, border: `1px solid ${isFolder && dragOverFolderId === itemId ? "#3b82f6" : T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", cursor: "grab", userSelect: "none", position: "relative", boxShadow: isFolder && dragOverFolderId === itemId ? "0 0 0 1px rgba(59,130,246,0.3)" : "none" }}>
+          <div
+            key={itemId}
+            draggable
+            data-folder-id={isFolder ? itemId : undefined}
+            data-item-id={!isFolder ? itemId : undefined}
+            onDragStart={() => { dragItem.current = itemId; }}
+            onDragEnter={() => { if (isFolder) setDragOverFolderId(itemId); }}
+            onDragOver={(e) => { e.preventDefault(); if (isFolder) setDragOverFolderId(itemId); }}
+            onDragEnd={() => { dragItem.current = null; setDragOverFolderId(null); }}
+            onDrop={(e) => { e.preventDefault(); if (isFolder) { handleDropOnFolder(itemId); return; } handleDropOnItem(parentFolderId, itemId); }}
+            onTouchStart={(e) => {
+              const touch = e.touches?.[0];
+              if (!touch) return;
+              e.preventDefault();
+              touchDragItem.current = itemId;
+              setTouchGhost({ x: touch.clientX, y: touch.clientY, itemId });
+            }}
+            onTouchMove={(e) => {
+              const touch = e.touches?.[0];
+              if (!touch) return;
+              e.preventDefault();
+              setTouchGhost({ x: touch.clientX, y: touch.clientY, itemId });
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              finishTouchDrag(e);
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            style={{ background: T.card, border: `1px solid ${isFolder && dragOverFolderId === itemId ? "#3b82f6" : T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", cursor: "grab", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", touchAction: "none", position: "relative", boxShadow: isFolder && dragOverFolderId === itemId ? "0 0 0 1px rgba(59,130,246,0.3)" : "none" }}
+          >
+            {touchGhost && touchGhost.itemId === itemId && (
+              <div style={{ position: "fixed", left: touchGhost.x + 16, top: touchGhost.y + 16, pointerEvents: "none", zIndex: 99999, background: "rgba(15, 18, 30, 0.92)", color: "#fff", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.15)", padding: "6px 10px", fontSize: "12px", boxShadow: "0 12px 30px rgba(0,0,0,0.28)" }}>
+                {getDisplayName(r)}
+              </div>
+            )}
             {isFolder && dragOverFolderId === itemId && (
               <div style={{ position: "absolute", inset: 0, borderRadius: "12px", background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(59,130,246,0.08))", border: "2px dashed #3b82f6", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", color: "#3b82f6", fontSize: "14px", zIndex: 1 }}>
                 إضافة الملف
