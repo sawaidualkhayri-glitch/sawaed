@@ -3018,6 +3018,13 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
   // state لتتبع التقدم لكل ملف: { fileId: 0-100 | "saving" | "done" | "error" }
   const [dlProgress, setDlProgress] = useState({});
   const [downloadingIds, setDownloadingIds] = useState({});
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 640 : false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const handleSaveToDevice = async (item) => {
     const key = item?.id || item?.url;
@@ -3249,7 +3256,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
       const isExpanded = expandedFolderIds.has(folderId);
 
       return (
-        <div key={folderId} style={{ marginRight: depth * 16, marginTop: "8px" }}>
+        <div key={folderId} style={{ marginRight: depth * 16, marginTop: "8px", marginLeft: "12px", marginRight: `calc(${depth * 16}px + 12px)`, width: "calc(100% - 24px)", boxSizing: "border-box" }}>
           <div
             style={{
               background: T.card,
@@ -3322,7 +3329,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     };
 
     return (
-      <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginTop: "8px", marginRight: depth * 16, backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "100%", boxSizing: "border-box", maxWidth: "100%", minWidth: 0 }}>
+      <div key={index} style={{ background: T.card, border: `1.5px solid ${prog === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : prog === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", marginTop: "8px", marginLeft: "12px", marginRight: `calc(${depth * 16}px + 12px)`, backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", width: "calc(100% - 24px)", boxSizing: "border-box", maxWidth: "100%", minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: "24px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
           <div style={{ minWidth: 0, overflow: "hidden" }}>
@@ -3476,9 +3483,16 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
   const [dlProgress, setDlProgress] = useState({});
   const [downloadingIds, setDownloadingIds] = useState({});
   const [expandedFolderIds, setExpandedFolderIds] = useState(new Set());
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 640 : false);
 
   useEffect(() => {
     idbGetAllFiles().then(files => setSavedIds(new Set(files.map(f => f.id))));
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   const getFolderChildren = (item) => {
@@ -3510,27 +3524,30 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
         const isExpanded = expandedFolderIds.has(folderId);
 
         return (
-          <div key={folderId} style={{ marginRight: depth * 16, marginTop: "8px" }}>
+          <div key={folderId} style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", paddingLeft: "16px", paddingRight: `${16 + depth * 16}px` }}>
             <div
               onClick={() => toggleFolder(folderId)}
               style={{
                 background: T.card,
                 border: `1px solid ${T.cardBorder}`,
                 borderRadius: "16px",
-                padding: "12px 14px",
+                padding: isMobile ? "12px" : "12px 14px",
                 display: "flex",
-                alignItems: "center",
+                alignItems: isMobile ? "stretch" : "center",
                 justifyContent: "space-between",
                 gap: "10px",
                 cursor: "pointer",
                 direction: "rtl",
+                flexDirection: isMobile ? "column" : "row",
+                width: "100%",
+                boxSizing: "border-box"
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
-                <span style={{ fontSize: "22px" }}>{isExpanded ? "📂" : "📁"}</span>
-                <span style={{ fontSize: "16px", color: T.accent, fontWeight: "700" }}>{isExpanded ? "▼" : "▶"}</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <p style={{ margin: 0, color: T.text, fontWeight: "700", fontSize: "14px", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1, width: isMobile ? "100%" : "auto", justifyContent: isMobile ? "center" : "flex-start" }}>
+                <span style={{ fontSize: "22px", flexShrink: 0 }}>{isExpanded ? "📂" : "📁"}</span>
+                <span style={{ fontSize: "16px", color: T.accent, fontWeight: "700", flexShrink: 0 }}>{isExpanded ? "▼" : "▶"}</span>
+                <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+                  <p style={{ margin: 0, color: T.text, fontWeight: "700", fontSize: isMobile ? "13px" : "14px", textAlign: isMobile ? "center" : "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {item.title || item.name || "مجلد"}
                   </p>
                 </div>
@@ -3538,7 +3555,7 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
             </div>
 
             {isExpanded && (
-              <div style={{ marginTop: "8px" }}>
+              <div style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", paddingLeft: "16px", paddingRight: "16px" }}>
                 {children.length > 0 ? renderTreeItems(children, depth + 1) : (
                   <div style={{ background: T.sectionBg, borderRadius: "12px", padding: "12px", color: T.subtext, fontSize: "12px", textAlign: "center" }}>
                     المجلد فارغ
@@ -3556,27 +3573,27 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
       const isDownloading = typeof prog === "number";
 
       return (
-        <div key={item.id || `${subject}-file-${index}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "10px 18px", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: "54px", gap: "12px", marginTop: "8px", marginRight: depth * 16 }}>
-          <div style={{ minWidth: 0, overflow: "hidden" }}>
-            {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700" }}>المدرس: {item.teacher}</p>}
-            <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: "14px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</p>
-            {item.description && <p style={{ margin: 0, fontSize: "12px", color: T.subtext, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.description}</p>}
+        <div key={item.id || `${subject}-file-${index}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: isMobile ? "12px" : "10px 16px", backdropFilter: "blur(10px)", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", minHeight: "54px", gap: isMobile ? "10px" : "12px", marginTop: "8px", width: "100%", boxSizing: "border-box", flexDirection: isMobile ? "column" : "row" }}>
+          <div style={{ minWidth: 0, overflow: "hidden", flex: isMobile ? "unset" : 1, width: isMobile ? "100%" : "auto" }}>
+            {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700", textAlign: isMobile ? "center" : "right" }}>المدرس: {item.teacher}</p>}
+            <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: isMobile ? "13px" : "14px", whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.title}</p>
+            {item.description && <p style={{ margin: 0, fontSize: "12px", color: T.subtext, whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.description}</p>}
           </div>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-start", paddingLeft: "12px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: isMobile ? "center" : "flex-start", paddingLeft: isMobile ? 0 : "12px", flexShrink: 0, width: isMobile ? "100%" : "auto" }}>
             {item.url && !isDownloading && (
               <>
-                <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>
+                <button onClick={() => handleFoundationOpen(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600", flexShrink: 0 }}>
                   🌐 أونلاين
                 </button>
-                <button onClick={() => isOfflineSaved ? handleFoundationOpenOffline(item) : handleFoundationSave(item)} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                <button onClick={() => isOfflineSaved ? handleFoundationOpenOffline(item) : handleFoundationSave(item)} style={{ background: isOfflineSaved ? "#23863615" : T.sectionBg, color: isOfflineSaved ? "#238636" : T.accent, border: `1.5px solid ${isOfflineSaved ? "#238636" : T.accent}`, borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700", flexShrink: 0 }}>
                   {isOfflineSaved ? "📂 بدون نت" : "⬇️ حفظ للمعاينة أوفلاين"}
                 </button>
                 {isOfflineSaved && (
-                  <button onClick={async () => { await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "8px 10px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+                  <button onClick={async () => { await idbDeleteFile(fileId); setSavedIds(s => { const n = new Set(s); n.delete(fileId); return n; }); }} style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid #ef4444", borderRadius: "10px", padding: "8px 10px", fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "700", flexShrink: 0 }}>
                     🗑️
                   </button>
                 )}
-                <button onClick={() => handleFoundationSaveToDevice(item)} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap" }}>
+                <button onClick={() => handleFoundationSaveToDevice(item)} disabled={Boolean(downloadingIds[item.id || item.url])} style={{ background: downloadingIds[item.id || item.url] ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "8px 14px", fontSize: "13px", cursor: downloadingIds[item.id || item.url] ? "not-allowed" : "pointer", opacity: downloadingIds[item.id || item.url] ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700", whiteSpace: "nowrap", flexShrink: 0 }}>
                   {downloadingIds[item.id || item.url] ? "⏳ جاري التحميل..." : "💾 حفظ للجهاز"}
                 </button>
               </>
@@ -5641,6 +5658,7 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   const [selBranch, setSelBranch] = useState((config.foundationBranches?.[config.foundationSubjects?.[0]] || [])[0] || "");
   const [selType, setSelType] = useState("electronic");
   const [selArea, setSelArea] = useState((config.foundationTypes?.electronic || [])[0] || "");
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" ? window.innerWidth < 640 : false);
   const [form, setForm] = useState({ title: "", url: "", description: "", teacher: "", type: "link" });
   const [showDriveFolderModal, setShowDriveFolderModal] = useState(false);
   const [driveFolderName, setDriveFolderName] = useState("");
@@ -5653,6 +5671,12 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
   const [items, setItems] = useState([]);
   const requiredFormCheck = validateRequiredFields(form, ["title", "url"]);
   const validDriveFolder = Boolean(driveFolderName.trim()) && Boolean(normalizeDriveFolderInput(driveFolderUrl));
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => { const raw = config[foundKey]; setItems(raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []); }, [foundKey]);
 
