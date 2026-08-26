@@ -231,6 +231,30 @@ function isDriveUrl(url) {
   return url && (url.includes("drive.google.com") || url.includes("docs.google.com/uc"));
 }
 
+// Check if a file is an image based on MIME type or extension
+function isImageFile(url, mimeType, title) {
+  const imageExtensionRegex = /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/i;
+  const imageMimeRegex = /^image\//i;
+  
+  return (
+    (mimeType && imageMimeRegex.test(mimeType)) ||
+    (url && imageExtensionRegex.test(url)) ||
+    (title && imageExtensionRegex.test(title))
+  );
+}
+
+// Get direct Google image URL (using lh3.googleusercontent.com)
+function getDirectGoogleImageUrl(fileId) {
+  if (!fileId) return null;
+  return `https://lh3.googleusercontent.com/d/${fileId}`;
+}
+
+// Get alternative direct Google Drive image URL (using drive.google.com/uc export)
+function getDirectDriveImageUrl(fileId) {
+  if (!fileId) return null;
+  return `https://drive.google.com/uc?export=view&id=${fileId}`;
+}
+
 function formatSize(bytes) {
   if (!bytes) return "غير معروف";
   if (bytes < 1024) return bytes + " B";
@@ -280,9 +304,21 @@ function getFileMimeType(resource = {}, blob) {
   return "application/octet-stream";
 }
 
-function getOnlineViewUrl(inputUrl) {
+function getOnlineViewUrl(inputUrl, mimeType, title) {
   if (!inputUrl) return "";
-  if (typeof isDriveUrl === "function" && isDriveUrl(inputUrl)) return driveEmbedUrl(inputUrl);
+  if (typeof isDriveUrl === "function" && isDriveUrl(inputUrl)) {
+    // For images: use direct Google image URL to avoid CORB errors
+    // /preview endpoint returns HTML, not image data, causing CORB to block
+    if (isImageFile(inputUrl, mimeType, title)) {
+      const fileId = extractDriveId(inputUrl);
+      if (fileId) {
+        // Return lh3.googleusercontent.com URL which serves raw image data
+        return getDirectGoogleImageUrl(fileId);
+      }
+    }
+    // For PDFs and documents: use /preview endpoint
+    return driveEmbedUrl(inputUrl);
+  }
   return inputUrl;
 }
 
@@ -901,6 +937,32 @@ function normalizeItemTree(items) {
       id: item.id || createItemId("file"),
     };
   });
+}
+
+function dissolveFolderInTree(items, folderId) {
+  if (!Array.isArray(items)) return { items: [], found: false };
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const isFolder = item?.type === "folder" || item?.isFolder || Array.isArray(item?.children) || Array.isArray(item?.items);
+    if (isFolder && item?.id === folderId) {
+      const children = Array.isArray(item.children) ? item.children : item.items || [];
+      return { items: [...items.slice(0, index), ...children, ...items.slice(index + 1)], found: true };
+    }
+
+    if (isFolder) {
+      const childItems = Array.isArray(item.children) ? item.children : item.items;
+      if (Array.isArray(childItems)) {
+        const result = dissolveFolderInTree(childItems, folderId);
+        if (result.found) {
+          const updatedItem = { ...item, ...(Array.isArray(item.children) ? { children: result.items } : { items: result.items }) };
+          return { items: [...items.slice(0, index), updatedItem, ...items.slice(index + 1)], found: true };
+        }
+      }
+    }
+  }
+
+  return { items, found: false };
 }
 
 // ============================================================
@@ -2378,17 +2440,9 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
     }
   };
 
-  const viewUrl = localUrl || getOnlineViewUrl(url);
-  const imageExtensionRegex = /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/i;
-  const isImageUrl = (value) => typeof value === "string" && imageExtensionRegex.test(value);
   const isPdf = isPdfMimeType(mimeType) || (typeof title === "string" && title.toLowerCase().endsWith(".pdf"));
-  const isImageContent = !isPdf && (
-    isImageMimeType(mimeType) ||
-    (typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/")) ||
-    isImageUrl(url) ||
-    isImageUrl(title) ||
-    (savedBlob?.type && savedBlob.type.toLowerCase().startsWith("image/"))
-  );
+  const isImageContent = !isPdf && isImageFile(url, mimeType, title);
+  const viewUrl = localUrl || getOnlineViewUrl(url, mimeType, title);
   const imageSrc = localUrl || viewUrl;
 
   return (
@@ -2466,7 +2520,19 @@ function FileViewer({ url, title, T, onClose, isBlobDirect = false, mimeType = "
           </div>
         ) : isImageContent ? (
           <div style={{ flex: "1 1 0%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", width: "100%", height: "100%", minHeight: "0px", minWidth: "0px", overflow: "auto", padding: "16px", boxSizing: "border-box" }}>
-            <img alt={title || "صورة"} src={imageSrc} style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", display: "block", borderRadius: "12px" }} />
+            <img 
+              alt={title || "صورة"} 
+              src={imageSrc} 
+              referrerPolicy="no-referrer"
+              style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", display: "block", borderRadius: "12px" }}
+              onError={(e) => {
+                // Fallback to alternative direct URL if primary fails
+                const fileId = extractDriveId(url);
+                if (fileId && e.target.src === getDirectGoogleImageUrl(fileId)) {
+                  e.target.src = getDirectDriveImageUrl(fileId);
+                }
+              }}
+            />
           </div>
         ) : (
           <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', background: '#111', minHeight: 0, minWidth: 0 }}>
@@ -2921,6 +2987,17 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
     await saveCurrentItems(newItems);
   };
 
+  const handleDissolveFolder = async (folderId) => {
+    if (!folderId) return;
+    if (!window.confirm("هل أنت متأكد من حذف المجلد وإبقاء ملفاته داخل المجلد الأب؟")) return;
+
+    const result = dissolveFolderInTree(folderData, folderId);
+    if (!result.found) return;
+
+    await saveFolderData(result.items);
+    alert("تم تفريغ المجلد وحذفه بنجاح، وبقيت محتوياته في مستواه الأب.");
+  };
+
   const renameItem = async (index, newName) => {
     if (!newName.trim()) return;
     const newItems = [...currentItems];
@@ -3156,7 +3233,7 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
           </div>
           {canEditStructure && editorMode && (
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={() => openRenameModal(index, item.name)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px" }}>✏️</button>
+              <button onClick={() => handleDissolveFolder(item.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}66`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>📂🔓 تفريغ وحذف</button>
               <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>🗑️</button>
             </div>
           )}
@@ -4376,6 +4453,15 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
     onSave(copy);
   };
 
+  const dissolveRes = (folderId) => {
+    if (!folderId) return;
+    if (!window.confirm("هل أنت متأكد من حذف المجلد وإبقاء ملفاته داخل المجلد الأب؟")) return;
+    const result = dissolveFolderInTree(resources, folderId);
+    if (!result.found) return;
+    setResources(result.items);
+    onSave(result.items);
+  };
+
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "10px", padding: "8px 10px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "6px" };
 
   return (
@@ -4406,7 +4492,11 @@ function DraggableResourceList({ resources, setResources, T, onSave }) {
                 <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getDisplayName(r)}</p>
                 {r.description && <p style={{ margin: "2px 0 0", fontSize: "11px", color: T.subtext, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.description}</p>}
               </div>
-              <button onClick={() => startEdit(i)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px", flexShrink: 0 }}>✏️</button>
+              {(r.type === "folder" || r.isFolder || Array.isArray(r.children) || Array.isArray(r.items)) ? (
+                <button onClick={() => dissolveRes(r.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}66`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", flexShrink: 0, whiteSpace: "nowrap" }}>🗑️ حذف وإبقاء الملفات</button>
+              ) : (
+                <button onClick={() => startEdit(i)} title="تعديل" style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "14px", flexShrink: 0 }}>✏️</button>
+              )}
               <button onClick={() => deleteRes(i)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px", flexShrink: 0 }}>🗑️</button>
             </div>
           )}
@@ -6390,6 +6480,21 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     await saveFolderData(newData);
   };
 
+  const handleDissolveFolder = async (folderId) => {
+    if (!folderId) return;
+    if (!window.confirm("هل أنت متأكد من حذف المجلد وإبقاء ملفاته داخل المجلد الأب؟")) return;
+
+    const result = dissolveFolderInTree(folderData, folderId);
+    if (!result.found) return;
+
+    await saveFolderData(result.items);
+    setExpandedFolders(current => {
+      const next = new Set(current);
+      next.delete(folderId);
+      return next;
+    });
+  };
+
   const openEditItem = (item) => {
     setEditItemId(item.id);
     setEditItemForm({
@@ -6445,7 +6550,9 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
                     <button onClick={() => { setTargetFolderId(item.id); setShowAddFolderModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
                       + مجلد جديد
                     </button>
-                    <button onClick={() => openEditItem(item)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>✏️</button>
+                    <button onClick={() => handleDissolveFolder(item.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: "rgba(255, 80, 80, 0.15)", border: "1px solid rgba(255, 80, 80, 0.4)", color: "#ff6b6b", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px", whiteSpace: "nowrap" }}>
+                      🗑️ حذف وإبقاء الملفات
+                    </button>
                     <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
                       🗑️ حذف
                     </button>
