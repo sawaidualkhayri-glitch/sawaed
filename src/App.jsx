@@ -3294,10 +3294,10 @@ function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, 
                 <button onClick={() => handleDissolveFolder(item.id)} title="حذف المجلد وإبقاء الملفات بداخله" style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}66`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>📂🔓 تفريغ</button>
                 <button onClick={() => deleteItem(index)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", flexShrink: 0 }}>🗑️</button>
               </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {isExpanded && (
+            {isExpanded && (
             <div style={{ marginTop: "8px", width: "100%", boxSizing: "border-box", paddingLeft: "16px", paddingRight: "16px" }}>
               {children.length > 0 ? (
                 children.map((child, childIndex) => renderItem(child, childIndex, depth + 1))
@@ -3578,9 +3578,11 @@ function FoundationSubjectPage({ config, saveConfig, T, darkMode, data, onBack }
       return (
         <div key={item.id || `${subject}-file-${index}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: isMobile ? "12px" : "10px 16px", backdropFilter: "blur(10px)", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", minHeight: "54px", gap: isMobile ? "10px" : "12px", marginTop: "8px", width: "100%", boxSizing: "border-box", flexDirection: isMobile ? "column" : "row" }}>
           <div style={{ minWidth: 0, overflow: "hidden", flex: isMobile ? "unset" : 1, width: isMobile ? "100%" : "auto" }}>
+            <div style={{ minWidth: 0, overflow: "hidden", flex: 1 }}>
             {item.teacher && <p style={{ margin: "0 0 4px", fontSize: "12px", color: T.accent, fontWeight: "700", textAlign: isMobile ? "center" : "right" }}>المدرس: {item.teacher}</p>}
             <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: isMobile ? "13px" : "14px", whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.title}</p>
             {item.description && <p style={{ margin: 0, fontSize: "12px", color: T.subtext, whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.description}</p>}
+            </div>
           </div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", justifyContent: isMobile ? "center" : "flex-start", paddingLeft: isMobile ? 0 : "12px", flexShrink: 0, width: isMobile ? "100%" : "auto" }}>
             {item.url && !isDownloading && (
@@ -4533,17 +4535,14 @@ function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermiss
 }
 
 // ============================================================
-// DRAG & DROP RESOURCE LIST
+// RESOURCE LIST
 // ============================================================
 
-function DraggableResourceList({ resources, setResources, T, onSave, onAddFileToFolder = null, onAddSubfolderToFolder = null }) {
+function ResourceList({ resources, setResources, T, onSave, onAddFileToFolder = null, onAddSubfolderToFolder = null, enableBulkMove = false }) {
   const [editIdx, setEditIdx] = useState(null);
   const [editForm, setEditForm] = useState({});
-  const [dragOverFolderId, setDragOverFolderId] = useState(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState(new Set());
-  const [touchGhost, setTouchGhost] = useState(null);
-  const dragItem = useRef(null);
-  const touchDragItem = useRef(null);
+  const [selectedFileIds, setSelectedFileIds] = useState([]);
 
   const getFolderItems = (item) => {
     if (!item || typeof item !== "object") return [];
@@ -4553,92 +4552,6 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
   };
 
   const isFolderLike = (item) => !!item && typeof item === "object" && (item.type === "folder" || item.isFolder || Array.isArray(item.items) || Array.isArray(item.children));
-
-  const findItemById = (list, itemId) => {
-    for (const item of list) {
-      if (!item || typeof item !== "object") continue;
-      if (item.id === itemId) return item;
-      if (isFolderLike(item)) {
-        const nested = findItemById(getFolderItems(item), itemId);
-        if (nested) return nested;
-      }
-    }
-    return null;
-  };
-
-  const removeItemById = (list, itemId) => {
-    let removed = null;
-    const next = list.flatMap((item) => {
-      if (!item || typeof item !== "object") return [item];
-      if (item.id === itemId) {
-        removed = item;
-        return [];
-      }
-      if (isFolderLike(item)) {
-        const childResult = removeItemById(getFolderItems(item), itemId);
-        if (childResult.removed) {
-          const updatedChildren = childResult.list;
-          return [{ ...item, items: updatedChildren, children: updatedChildren }];
-        }
-      }
-      return [item];
-    });
-    return { list: next, removed };
-  };
-
-  const appendItemToFolder = (list, folderId, item) => {
-    return list.map((entry) => {
-      if (!entry || typeof entry !== "object") return entry;
-      if (isFolderLike(entry) && entry.id === folderId) {
-        const nextItems = [...getFolderItems(entry), item];
-        return { ...entry, items: nextItems, children: nextItems };
-      }
-      if (isFolderLike(entry)) {
-        const nextItems = appendItemToFolder(getFolderItems(entry), folderId, item);
-        return { ...entry, items: nextItems, children: nextItems };
-      }
-      return entry;
-    });
-  };
-
-  const moveItemToFolder = (list, draggedId, targetFolderId) => {
-    if (!draggedId || !targetFolderId || draggedId === targetFolderId) return list;
-    const draggedEntry = findItemById(list, draggedId);
-    if (!draggedEntry || isFolderLike(draggedEntry)) return list;
-    const result = removeItemById(list, draggedId);
-    if (!result.removed) return list;
-    return appendItemToFolder(result.list, targetFolderId, result.removed);
-  };
-
-  const reorderById = (list, fromId, toId) => {
-    const fromIndex = list.findIndex((entry) => entry && entry.id === fromId);
-    const toIndex = list.findIndex((entry) => entry && entry.id === toId);
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return list;
-    const next = [...list];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    return next;
-  };
-
-  const reorderInTree = (list, parentFolderId, fromId, toId) => {
-    if (!fromId || !toId || fromId === toId) return list;
-    if (!parentFolderId) {
-      return reorderById(list, fromId, toId);
-    }
-
-    return list.map((entry) => {
-      if (!entry || typeof entry !== "object") return entry;
-      if (isFolderLike(entry) && entry.id === parentFolderId) {
-        const nextItems = reorderById(getFolderItems(entry), fromId, toId);
-        return { ...entry, items: nextItems, children: nextItems };
-      }
-      if (isFolderLike(entry)) {
-        const nextItems = reorderInTree(getFolderItems(entry), parentFolderId, fromId, toId);
-        return { ...entry, items: nextItems, children: nextItems };
-      }
-      return entry;
-    });
-  };
 
   const getDisplayName = (item) => {
     if (!item || typeof item !== "object") return "عنصر";
@@ -4700,28 +4613,75 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
     onSave(result.items);
   };
 
-  const handleDropOnFolder = (folderId) => {
-    const activeItemId = dragItem.current || touchDragItem.current;
-    if (!activeItemId || !folderId || activeItemId === folderId) return;
-    const next = moveItemToFolder(resources, activeItemId, folderId);
-    if (next !== resources) {
-      setResources(next);
-      onSave(next);
+  const reorderResourceTree = (list, itemId, direction) => {
+    const currentIndex = list.findIndex(item => item?.id === itemId);
+    const targetIndex = direction === "UP" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex >= 0 && targetIndex >= 0 && targetIndex < list.length) {
+      const reordered = [...list];
+      const [moved] = reordered.splice(currentIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+      return reordered.map((item, index) => item && typeof item === "object" ? { ...item, order: index } : item);
     }
-    dragItem.current = null;
-    touchDragItem.current = null;
-    setDragOverFolderId(null);
-    setTouchGhost(null);
+    for (let index = 0; index < list.length; index += 1) {
+      const item = list[index];
+      if (!isFolderLike(item)) continue;
+      const children = getFolderItems(item);
+      const nextChildren = reorderResourceTree(children, itemId, direction);
+      if (nextChildren !== children) {
+        return list.map((entry, entryIndex) => entryIndex === index ? { ...entry, items: nextChildren, children: nextChildren } : entry);
+      }
+    }
+    return list;
   };
 
-  const handleDropOnItem = (parentFolderId, targetId) => {
-    if (!dragItem.current || !targetId || dragItem.current === targetId) return;
-    const next = reorderInTree(resources, parentFolderId, dragItem.current, targetId);
+  const moveResourceItem = (itemId, direction) => {
+    const next = reorderResourceTree(resources, itemId, direction);
     if (next !== resources) {
       setResources(next);
       onSave(next);
     }
-    dragItem.current = null;
+  };
+
+  const toggleSelectedFile = (fileId) => {
+    setSelectedFileIds(previous => previous.includes(fileId)
+      ? previous.filter(id => id !== fileId)
+      : [...previous, fileId]
+    );
+  };
+
+  const collectSelectedFiles = (list, selectedIds, collected = []) => {
+    for (const item of list || []) {
+      if (!item || typeof item !== "object") continue;
+      if (isFolderLike(item)) collectSelectedFiles(getFolderItems(item), selectedIds, collected);
+      else if (selectedIds.includes(item.id)) collected.push(item);
+    }
+    return collected;
+  };
+
+  const removeSelectedFiles = (list, selectedIds) => (list || []).flatMap(item => {
+    if (!item || typeof item !== "object") return [item];
+    if (isFolderLike(item)) {
+      const children = removeSelectedFiles(getFolderItems(item), selectedIds);
+      return [{ ...item, items: children, children }];
+    }
+    return selectedIds.includes(item.id) ? [] : [item];
+  });
+
+  const appendFilesToFolder = (list, folderId, files) => (list || []).map(item => {
+    if (!item || typeof item !== "object" || !isFolderLike(item)) return item;
+    const children = getFolderItems(item);
+    if (item.id === folderId) return { ...item, items: [...children, ...files], children: [...children, ...files] };
+    const nextChildren = appendFilesToFolder(children, folderId, files);
+    return { ...item, items: nextChildren, children: nextChildren };
+  });
+
+  const moveSelectedFilesToFolder = (folderId) => {
+    if (!enableBulkMove || !selectedFileIds.length) return;
+    const files = collectSelectedFiles(resources, selectedFileIds);
+    const next = appendFilesToFolder(removeSelectedFiles(resources, selectedFileIds), folderId, files);
+    setResources(next);
+    setSelectedFileIds([]);
+    onSave(next);
   };
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "10px", padding: "8px 10px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "6px" };
@@ -4733,24 +4693,6 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
       else next.add(folderId);
       return next;
     });
-  };
-
-  const finishTouchDrag = (event) => {
-    const touch = event.changedTouches?.[0];
-    if (!touch) return;
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    const folderTarget = target?.closest("[data-folder-id]");
-    if (folderTarget) {
-      handleDropOnFolder(folderTarget.dataset.folderId);
-    } else {
-      const itemTarget = target?.closest("[data-item-id]");
-      if (itemTarget && itemTarget.dataset.itemId !== (touchDragItem.current || "")) {
-        handleDropOnItem(parentFolderId, itemTarget.dataset.itemId);
-      }
-    }
-    dragItem.current = null;
-    touchDragItem.current = null;
-    setTouchGhost(null);
   };
 
   const renderList = (list, depth = 0, parentFolderId = null) => (
@@ -4765,44 +4707,8 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
         return (
           <div
             key={itemId}
-            draggable
-            data-folder-id={isFolder ? itemId : undefined}
-            data-item-id={!isFolder ? itemId : undefined}
-            onDragStart={() => { dragItem.current = itemId; }}
-            onDragEnter={() => { if (isFolder) setDragOverFolderId(itemId); }}
-            onDragOver={(e) => { e.preventDefault(); if (isFolder) setDragOverFolderId(itemId); }}
-            onDragEnd={() => { dragItem.current = null; setDragOverFolderId(null); }}
-            onDrop={(e) => { e.preventDefault(); if (isFolder) { handleDropOnFolder(itemId); return; } handleDropOnItem(parentFolderId, itemId); }}
-            onTouchStart={(e) => {
-              const touch = e.touches?.[0];
-              if (!touch) return;
-              e.preventDefault();
-              touchDragItem.current = itemId;
-              setTouchGhost({ x: touch.clientX, y: touch.clientY, itemId });
-            }}
-            onTouchMove={(e) => {
-              const touch = e.touches?.[0];
-              if (!touch) return;
-              e.preventDefault();
-              setTouchGhost({ x: touch.clientX, y: touch.clientY, itemId });
-            }}
-            onTouchEnd={(e) => {
-              e.preventDefault();
-              finishTouchDrag(e);
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            style={{ background: T.card, border: `1px solid ${isFolder && dragOverFolderId === itemId ? "#3b82f6" : T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", cursor: "grab", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", touchAction: "none", position: "relative", boxShadow: isFolder && dragOverFolderId === itemId ? "0 0 0 1px rgba(59,130,246,0.3)" : "none" }}
+            style={{ background: enableBulkMove && !isFolder && selectedFileIds.includes(r.id) ? "repeating-linear-gradient(45deg, rgba(37, 99, 235, 0.15), rgba(37, 99, 235, 0.15) 10px, rgba(59, 130, 246, 0.25) 10px, rgba(59, 130, 246, 0.25) 20px)" : T.card, border: enableBulkMove && !isFolder && selectedFileIds.includes(r.id) ? "2px dashed #3b82f6" : `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", userSelect: "none", position: "relative", transition: "all 0.2s ease-in-out" }}
           >
-            {touchGhost && touchGhost.itemId === itemId && (
-              <div style={{ position: "fixed", left: touchGhost.x + 16, top: touchGhost.y + 16, pointerEvents: "none", zIndex: 99999, background: "rgba(15, 18, 30, 0.92)", color: "#fff", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.15)", padding: "6px 10px", fontSize: "12px", boxShadow: "0 12px 30px rgba(0,0,0,0.28)" }}>
-                {getDisplayName(r)}
-              </div>
-            )}
-            {isFolder && dragOverFolderId === itemId && (
-              <div style={{ position: "absolute", inset: 0, borderRadius: "12px", background: "linear-gradient(135deg, rgba(59,130,246,0.18), rgba(59,130,246,0.08))", border: "2px dashed #3b82f6", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", color: "#3b82f6", fontSize: "14px", zIndex: 1 }}>
-                إضافة الملف
-              </div>
-            )}
             {editIdx === i ? (
               <div>
                 {isFolder ? (
@@ -4821,7 +4727,9 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
               </div>
             ) : (
               <div style={{ display: "flex", alignItems: "center", gap: "10px", position: "relative", zIndex: 2 }}>
-                <span style={{ fontSize: "18px", color: T.subtext, cursor: "grab", flexShrink: 0 }}>☰</span>
+                {enableBulkMove && !isFolder && (
+                  <input type="checkbox" checked={selectedFileIds.includes(r.id)} onChange={(event) => { event.stopPropagation(); toggleSelectedFile(r.id); }} aria-label={`تحديد ${getDisplayName(r)}`} style={{ accentColor: T.accent, width: "18px", height: "18px", flexShrink: 0 }} />
+                )}
                 <button
                   type="button"
                   onClick={() => isFolder && toggleFolderExpanded(itemId)}
@@ -4837,6 +4745,11 @@ function DraggableResourceList({ resources, setResources, T, onSave, onAddFileTo
                   <p style={{ margin: 0, fontWeight: "700", color: T.text, fontSize: "13px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getDisplayName(r)}</p>
                   {r.description && <p style={{ margin: "2px 0 0", fontSize: "11px", color: T.subtext, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.description}</p>}
                 </div>
+                {enableBulkMove && isFolder && selectedFileIds.length > 0 && (
+                  <button type="button" onClick={(event) => { event.stopPropagation(); moveSelectedFilesToFolder(itemId); }} style={{ background: "rgba(59, 130, 246, 0.18)", border: "1px solid #3b82f6", color: "#3b82f6", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>⬆️ نقل الملفات المحددة هنا</button>
+                )}
+                <button type="button" disabled={i === 0} onClick={(event) => { event.stopPropagation(); moveResourceItem(itemId, "UP"); }} title="تحريك للأعلى" style={{ opacity: i === 0 ? 0.3 : 1, cursor: i === 0 ? "not-allowed" : "pointer", border: "none", background: "transparent", fontSize: "16px", flexShrink: 0 }}>⬆️</button>
+                <button type="button" disabled={i === list.length - 1} onClick={(event) => { event.stopPropagation(); moveResourceItem(itemId, "DOWN"); }} title="تحريك لأسفل" style={{ opacity: i === list.length - 1 ? 0.3 : 1, cursor: i === list.length - 1 ? "not-allowed" : "pointer", border: "none", background: "transparent", fontSize: "16px", flexShrink: 0 }}>⬇️</button>
                 {isFolder ? (
                   <>
                     <button onClick={() => onAddFileToFolder?.(r.id)} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "12px", whiteSpace: "nowrap" }}>➕ إضافة ملف إلى المجلد</button>
@@ -5996,12 +5909,13 @@ function AdminFoundation({ config, saveConfig, T, onBack }) {
       </div>
       {items.length > 0 && (
         <div>
-          <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>اسحب ↕ لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف</p>
-          <DraggableResourceList
+          <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>⬆️⬇️ لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف</p>
+          <ResourceList
             resources={items}
             setResources={setItems}
             T={T}
             onSave={save}
+            enableBulkMove={true}
             onAddFileToFolder={(folderId) => {
               setTargetFolderId(folderId);
               setShowAddFileModal(true);
@@ -6590,8 +6504,7 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
   const [editItemId, setEditItemId] = useState(null);
   const [editItemForm, setEditItemForm] = useState({ title: "", url: "", type: "link" });
   const [expandedFolders, setExpandedFolders] = useState(new Set());
-  const dragItemId = useRef(null);
-  const dragOverItemId = useRef(null);
+  const [selectedFileIds, setSelectedFileIds] = useState([]);
 
   const sectionsList = config.subjectSections || [
     "الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات",
@@ -6706,22 +6619,62 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     return item;
   });
 
-  const reorderItemsAtLevel = (items, parentId, fromId, toId) => {
-    if (parentId === null) {
-      const fromIndex = items.findIndex(item => item?.id === fromId);
-      const toIndex = items.findIndex(item => item?.id === toId);
-      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return items;
-      const reordered = [...items];
-      const [moved] = reordered.splice(fromIndex, 1);
-      reordered.splice(toIndex, 0, moved);
-      return reordered;
+  const toggleSelectedFile = (fileId) => {
+    setSelectedFileIds((prev) => {
+      if (prev.includes(fileId)) return prev.filter((id) => id !== fileId);
+      return [...prev, fileId];
+    });
+  };
+
+  const collectSelectedFiles = (items, selectedIds, acc = []) => {
+    for (const item of items || []) {
+      if (!item || typeof item !== "object") continue;
+      if (item.type === "folder") {
+        collectSelectedFiles(item.children || [], selectedIds, acc);
+        continue;
+      }
+      if (selectedIds.includes(item.id)) {
+        acc.push(item);
+      }
     }
-    return items.map(item => item?.type === "folder"
-      ? item.id === parentId
-        ? { ...item, children: reorderItemsAtLevel(item.children || [], null, fromId, toId) }
-        : { ...item, children: reorderItemsAtLevel(item.children || [], parentId, fromId, toId) }
-      : item
-    );
+    return acc;
+  };
+
+  const removeSelectedFiles = (items, selectedIds) => {
+    return (items || []).flatMap((item) => {
+      if (!item || typeof item !== "object") return [item];
+      if (item.type === "folder") {
+        const nextChildren = removeSelectedFiles(item.children || [], selectedIds);
+        return [{ ...item, children: nextChildren }];
+      }
+      return selectedIds.includes(item.id) ? [] : [item];
+    });
+  };
+
+  const appendFilesToFolder = (items, folderId, filesToMove) => {
+    if (!filesToMove.length) return items;
+    return (items || []).map((item) => {
+      if (!item || typeof item !== "object") return item;
+      if (item.type === "folder" && item.id === folderId) {
+        return { ...item, children: [...(item.children || []), ...filesToMove] };
+      }
+      if (item.type === "folder") {
+        return { ...item, children: appendFilesToFolder(item.children || [], folderId, filesToMove) };
+      }
+      return item;
+    });
+  };
+
+  const moveSelectedFilesToFolder = async (folderId) => {
+    if (!selectedFileIds.length || !folderId) return;
+
+    const selectedFiles = collectSelectedFiles(folderData, selectedFileIds, []);
+    const trimmedTree = removeSelectedFiles(folderData, selectedFileIds);
+    const nextTree = appendFilesToFolder(trimmedTree, folderId, selectedFiles);
+
+    setFolderData(nextTree);
+    setSelectedFileIds([]);
+    await saveFolderData(nextTree);
   };
 
   useEffect(() => {
@@ -6995,32 +6948,57 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
     setEditItemId(null);
   };
 
-  const handleNestedDragEnd = async (parentId) => {
-    const fromId = dragItemId.current;
-    const toId = dragOverItemId.current;
-    dragItemId.current = null;
-    dragOverItemId.current = null;
-    if (!fromId || !toId || fromId === toId) return;
-    const newData = reorderItemsAtLevel(folderData, parentId, fromId, toId);
-    await saveFolderData(newData);
+  const reorderAdminTree = (list, itemId, direction) => {
+    const currentIndex = list.findIndex(item => item?.id === itemId);
+    const targetIndex = direction === "UP" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex >= 0 && targetIndex >= 0 && targetIndex < list.length) {
+      const reordered = [...list];
+      const [moved] = reordered.splice(currentIndex, 1);
+      reordered.splice(targetIndex, 0, moved);
+      return reordered.map((item, index) => item && typeof item === "object" ? { ...item, order: index } : item);
+    }
+    for (let index = 0; index < list.length; index += 1) {
+      const item = list[index];
+      if (item?.type !== "folder") continue;
+      const children = item.children || [];
+      const nextChildren = reorderAdminTree(children, itemId, direction);
+      if (nextChildren !== children) {
+        return list.map((entry, entryIndex) => entryIndex === index ? { ...entry, children: nextChildren } : entry);
+      }
+    }
+    return list;
+  };
+
+  const moveAdminItem = async (itemId, direction) => {
+    const nextData = reorderAdminTree(folderData, itemId, direction);
+    if (nextData === folderData) return;
+    await saveFolderData(nextData);
   };
 
   const renderItems = (items, depth = 0, parentId = null) => {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        {items.map((item) => {
+        {items.map((item, index) => {
           if (!item || typeof item !== "object") return null;
 
           if (item.type === "folder") {
             const nestedCount = countNestedItems(item);
             const isExpanded = expandedFolders.has(item.id);
+            const showMoveSelectedButton = selectedFileIds.length > 0;
             return (
-              <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, cursor: "grab" }}>
+              <div key={item.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                   <button onClick={() => setExpandedFolders(current => { const next = new Set(current); if (next.has(item.id)) next.delete(item.id); else next.add(item.id); return next; })} style={{ flex: 1, textAlign: "right", background: "transparent", border: "none", color: T.text, cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
                     📁 {item.name || item.title} ({nestedCount} عنصر) {isExpanded ? "▾" : "▸"}
                   </button>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button type="button" disabled={index === 0} onClick={() => moveAdminItem(item.id, "UP")} title="تحريك للأعلى" style={{ opacity: index === 0 ? 0.3 : 1, border: "none", background: "transparent", fontSize: "16px", cursor: index === 0 ? "not-allowed" : "pointer" }}>⬆️</button>
+                    <button type="button" disabled={index === items.length - 1} onClick={() => moveAdminItem(item.id, "DOWN")} title="تحريك لأسفل" style={{ opacity: index === items.length - 1 ? 0.3 : 1, border: "none", background: "transparent", fontSize: "16px", cursor: index === items.length - 1 ? "not-allowed" : "pointer" }}>⬇️</button>
+                    {showMoveSelectedButton && (
+                      <button type="button" onClick={() => moveSelectedFilesToFolder(item.id)} style={{ background: "rgba(59, 130, 246, 0.18)", border: "1px solid #3b82f6", color: "#3b82f6", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontWeight: 700, fontSize: "12px", whiteSpace: "nowrap" }}>
+                        ⬆️ نقل الملفات المحددة هنا
+                      </button>
+                    )}
                     <button onClick={() => { setTargetFolderId(item.id); setShowAddFileModal(true); }} style={{ background: `${T.accent}22`, border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
                       + ملف جديد
                     </button>
@@ -7047,10 +7025,42 @@ function AdminFolders({ config, saveConfig, T, onBack }) {
             );
           }
 
+          const isSelected = selectedFileIds.includes(item.id);
           return (
-            <div key={item.id} draggable onDragStart={() => { dragItemId.current = item.id; }} onDragEnter={() => { dragOverItemId.current = item.id; }} onDragEnd={() => handleNestedDragEnd(parentId)} onDragOver={e => e.preventDefault()} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "12px", marginRight: `${depth * 12}px`, marginLeft: "0px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "grab", boxSizing: "border-box", maxWidth: "100%", minWidth: 0, gap: "8px" }}>
-              <div>📄 {item.title || item.name}</div>
+            <div key={item.id} style={{
+              background: isSelected
+                ? "repeating-linear-gradient(45deg, rgba(37, 99, 235, 0.15), rgba(37, 99, 235, 0.15) 10px, rgba(59, 130, 246, 0.25) 10px, rgba(59, 130, 246, 0.25) 20px)"
+                : T.card,
+              border: isSelected ? "2px dashed #3b82f6" : `1px solid ${T.cardBorder}`,
+              borderRadius: "12px",
+              padding: "12px",
+              marginRight: `${depth * 12}px`,
+              marginLeft: "0px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              boxSizing: "border-box",
+              maxWidth: "100%",
+              minWidth: 0,
+              gap: "8px",
+              transition: "all 0.2s ease-in-out"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    toggleSelectedFile(item.id);
+                  }}
+                  aria-label={`تحديد ${item.title || item.name}`}
+                  style={{ accentColor: T.accent, width: "18px", height: "18px", flexShrink: 0 }}
+                />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {item.title || item.name}</span>
+              </div>
               <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" disabled={index === 0} onClick={() => moveAdminItem(item.id, "UP")} title="تحريك للأعلى" style={{ opacity: index === 0 ? 0.3 : 1, border: "none", background: "transparent", fontSize: "16px", cursor: index === 0 ? "not-allowed" : "pointer" }}>⬆️</button>
+                <button type="button" disabled={index === items.length - 1} onClick={() => moveAdminItem(item.id, "DOWN")} title="تحريك لأسفل" style={{ opacity: index === items.length - 1 ? 0.3 : 1, border: "none", background: "transparent", fontSize: "16px", cursor: index === items.length - 1 ? "not-allowed" : "pointer" }}>⬇️</button>
                 <button onClick={() => openEditItem(item)} style={{ background: `${T.accent}22`, border: "none", borderRadius: "8px", padding: "6px 10px", cursor: "pointer" }}>✏️</button>
                 <button onClick={() => deleteItem(item.id)} style={{ background: "#e5533322", border: "1px solid #e55", color: "#e55", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", fontSize: "13px" }}>
                   🗑️ حذف
