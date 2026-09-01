@@ -145,3 +145,28 @@ select option {
   background-color: #1e1b3a;
   color: #ffffff;
 }
+
+.oled-mode {
+  --bg-main: #000000 !important;
+  --bg-card: #080808 !important;
+  --bg-secondary: #0d0d0d !important;
+  --bg: #000000 !important;
+}
+
+.oled-mode body,
+.oled-mode main,
+.oled-mode #root,
+.oled-mode .app-shell,
+.oled-mode .app-shell-fluid,
+.oled-mode .bg-slate-900,
+.oled-mode .bg-zinc-900,
+.oled-mode .bg-gray-900 {
+  background-color: #000000 !important;
+  background-image: none !important;
+}
+
+.oled-mode .bg-slate-800,
+.oled-mode .bg-zinc-800,
+.oled-mode .bg-gray-800 {
+  background-color: #0a0a0a !important;
+}

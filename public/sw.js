@@ -38,10 +38,24 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("sync", (event) => {
+  if (event.tag !== "sync-app-data") return;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      clients.forEach((client) => client.postMessage({ type: "SYNC_APP_DATA" }));
+    })
+  );
+});
+
 // 3. FETCH - اعتراض وتوجيه الطلبات
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  if (url.searchParams.has("network_probe")) {
+    event.respondWith(fetch(request, { cache: "no-store" }));
+    return;
+  }
 
   // Pass through proxy / Cloudflare / API requests directly to the network.
   // This avoids service worker lockups and Pending fetch states on worker requests.
