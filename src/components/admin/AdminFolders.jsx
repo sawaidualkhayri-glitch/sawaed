@@ -41,13 +41,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
   const storageKey = (selectedSubject && selectedSection) ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) : "";
 
-  const getAvailableSubjects = () => {
-    const allSubs = new Set();
-    const brs = config.branches || branches;
-    brs.forEach(br => getSubjectsByGradeBranch(config.subjects, selectedGrade, br, true).forEach(sub => allSubs.add(sub)));
-    return Array.from(allSubs);
-  };
-  const availableSubjects = getAvailableSubjects();
+  const availableSubjects = getSubjectsByGradeBranch(config.subjects, selectedGrade, selectedBranch, false);
 
   useEffect(() => {
     const isG11 = canonicalizeGrade(selectedGrade).includes("حادي عشر");
