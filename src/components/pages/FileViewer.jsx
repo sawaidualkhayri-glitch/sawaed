@@ -222,7 +222,7 @@ function getFileMimeType(resource = {}, blob) {
 export default function FileViewer({ url, title, T, fileId: providedFileId, onClose, isBlobDirect = false, mimeType = "application/pdf", onStatusChange }) {
   const [localUrl, setLocalUrl] = useState(isBlobDirect ? url : null);
   const [savedBlob, setSavedBlob] = useState(null);
-  const [loading, setLoading] = useState(!isBlobDirect);
+  const [loading, setLoading] = useState(!isBlobDirect && !navigator.onLine);
   const [error, setError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savePending, setSavePending] = useState(false);
@@ -312,8 +312,16 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
     let cancelled = false;
     let objectUrl = null;
 
+    // Mount the online PDF viewer immediately; IndexedDB lookup may replace it
+    // with a local copy later without blocking the network stream.
+    if (navigator.onLine) {
+      setLoading(false);
+      setError(false);
+      setLocalUrl(null);
+    }
+
     const init = async () => {
-      setLoading(true);
+      setLoading(!navigator.onLine);
       setError(false);
       try {
         const saved = await idbGetFile(fileId);
@@ -482,7 +490,7 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
         </div>
       )}
 
-      {loading ? (
+      {loading && !isPdf ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#111" }}>
           <p style={{ color: "#fff", fontSize: "16px" }}>جاري تحميل الملف...</p>
         </div>

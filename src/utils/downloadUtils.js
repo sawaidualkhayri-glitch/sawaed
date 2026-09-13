@@ -31,18 +31,15 @@ export async function fetchBinaryBlob(url, expectedTypes = ["application/pdf"], 
 
   const chunks = [];
   let loadedBytes = 0;
-  let lastPercent = 0;
-  onProgress?.(0);
+  if (totalBytes > 0) onProgress?.(0);
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     loadedBytes += value.byteLength;
-    const percent = totalBytes > 0
-      ? Math.min(99, Math.round((loadedBytes / totalBytes) * 100))
-      : Math.min(99, Math.max(lastPercent + 1, Math.round(loadedBytes / (1024 * 1024))));
-    lastPercent = percent;
-    onProgress?.(percent);
+    if (totalBytes > 0) {
+      onProgress?.(Math.round((loadedBytes / totalBytes) * 100));
+    }
   }
 
   const blob = new Blob(chunks, { type: response.headers.get("Content-Type") || expectedTypes[0] });

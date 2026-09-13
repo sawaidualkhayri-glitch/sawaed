@@ -36,3 +36,7 @@ reports/
 CLEANUP_AUDIT_REPORT.md
 CODE_AUDIT_COMPLETION_REPORT.md
 AUDIT_COMPLETION_MANIFEST.md
+
+# Local-only Cloudflare Worker source
+/workercod.js
+/src/workercod.js

@@ -8,26 +8,6 @@ export default function OfflineSyncBanner({ onSync }) {
   useEffect(() => {
     let hideTimer;
 
-    const checkRealConnection = async () => {
-      if (navigator.onLine === false) {
-        setIsOffline(true);
-        return false;
-      }
-
-      try {
-        const response = await fetch(`${window.location.origin}/manifest.json?network_probe=${Date.now()}`, {
-          method: "HEAD",
-          cache: "no-store",
-        });
-        const connected = response.ok;
-        setIsOffline(!connected);
-        return connected;
-      } catch {
-        setIsOffline(true);
-        return false;
-      }
-    };
-
     const handleOffline = () => {
       window.clearTimeout(hideTimer);
       setIsOffline(true);
@@ -36,9 +16,7 @@ export default function OfflineSyncBanner({ onSync }) {
     };
 
     const handleOnline = async () => {
-      const connected = await checkRealConnection();
-      if (!connected) return;
-
+      setIsOffline(false);
       setIsSyncing(true);
       setIsDismissed(false);
 
@@ -59,11 +37,8 @@ export default function OfflineSyncBanner({ onSync }) {
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
-    checkRealConnection();
-    const probeTimer = window.setInterval(checkRealConnection, 5000);
     return () => {
       window.clearTimeout(hideTimer);
-      window.clearInterval(probeTimer);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
     };

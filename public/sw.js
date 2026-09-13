@@ -2,8 +2,13 @@
 // SERVICE WORKER — سواعد الخير PWA (v5)
 // ============================================================
 
-const CACHE_NAME = "sawaed-files-v6";
-const SHELL_CACHE = "sawaed-shell-v6";
+import { precacheAndRoute } from "workbox-precaching";
+
+const CACHE_NAME = "sawaed-files-v7";
+const SHELL_CACHE = "sawaed-shell-v7";
+const PDF_RANGE_CACHE = "sawaed-pdf-ranges-v1";
+
+precacheAndRoute(self.__WB_MANIFEST);
 
 // ملفات الشل الأساسية
 const SHELL_ASSETS = [
@@ -32,7 +37,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     clients.claim().then(() => caches.keys().then((keys) =>
       Promise.all(keys
-        .filter((k) => k !== CACHE_NAME && k !== SHELL_CACHE)
+        .filter((k) => k !== CACHE_NAME && k !== SHELL_CACHE && k !== PDF_RANGE_CACHE)
         .map((k) => caches.delete(k)))
     ))
   );
@@ -52,11 +57,6 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  if (url.searchParams.has("network_probe")) {
-    event.respondWith(fetch(request, { cache: "no-store" }));
-    return;
-  }
-
   // Pass through proxy / Cloudflare / API requests directly to the network.
   // This avoids service worker lockups and Pending fetch states on worker requests.
   if (
@@ -64,6 +64,25 @@ self.addEventListener("fetch", (event) => {
     url.searchParams.has("fileId") ||
     url.hostname.includes("sawaed.hamodemsg.workers.dev")
   ) {
+    if (request.headers.has("range")) {
+      event.respondWith((async () => {
+        const rangeCache = await caches.open(PDF_RANGE_CACHE);
+        const rangeKey = new URL(request.url);
+        rangeKey.searchParams.set("__sawaed_range", request.headers.get("range"));
+        const cacheRequest = new Request(rangeKey.toString(), { method: "GET" });
+        const cached = await rangeCache.match(cacheRequest);
+        if (cached) return cached;
+
+        const response = await fetch(request, { cache: "no-store" });
+        if (response.ok || response.status === 206) {
+          // A range response is immutable for this URL and byte interval.
+          await rangeCache.put(cacheRequest, response.clone());
+        }
+        return response;
+      })().catch(() => new Response("{}", { status: 503 })));
+      return;
+    }
+
     event.respondWith(fetch(request, { cache: "no-store" }).catch(() => new Response("{}", { status: 503 })));
     return;
   }

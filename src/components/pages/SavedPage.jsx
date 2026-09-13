@@ -141,7 +141,7 @@ export default function SavedPage({ config, T, currentUser, updateUser, idbGetAl
       ) : (
         <div>
           <div style={{ display: "flex", gap: "6px", marginBottom: "12px", flexWrap: "wrap" }}><button onClick={() => setType(null)} style={{ background: !type ? T.accent : T.sectionBg, color: !type ? "#fff" : T.subtext, border: `1px solid ${T.cardBorder}`, borderRadius: "10px", padding: "6px 12px", fontSize: "12px", cursor: "pointer" }}>الكل</button>{config.savedTypes?.map(savedType => <button key={savedType} onClick={() => setType(savedType)} style={{ background: type === savedType ? T.accent : T.sectionBg, color: type === savedType ? "#fff" : T.subtext, border: `1px solid ${T.cardBorder}`, borderRadius: "10px", padding: "6px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>{savedType}</button>)}</div>
-          {items.length === 0 ? <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>🗂️</div><p style={{ color: T.subtext }}>لا يوجد محفوظات</p></div> : items.map((item, index) => {
+          {items.length === 0 ? <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "30px" }}>🗂️</div><p style={{ color: T.subtext }}>لا يوجد محفوظات</p></div> : items.map((item, index) => {
             const fileId = getFileId(item);
             const offlineKey = `${fileId}_offline`;
             const deviceKey = `${fileId}_device`;

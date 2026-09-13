@@ -1009,7 +1009,7 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
         </div>
       )}
 
-      <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+      <div style={{ paddingTop: "12px", paddingBottom: "12px", paddingLeft: "16px", paddingRight: "16px", display: "flex", flexDirection: "column", gap: "10px", width: "100%", boxSizing: "border-box", overflowX: "visible" }}>
         {loading && <p style={{ color: T.subtext, textAlign: "center" }}>جاري التحميل...</p>}
         {!loading && currentItems.length === 0 && <div style={{ textAlign: "center", padding: "40px" }}><div style={{ fontSize: "48px" }}>📭</div><p style={{ color: T.subtext }}>هذا المجلد فارغ</p></div>}
         {(() => {

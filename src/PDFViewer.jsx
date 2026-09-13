@@ -8,7 +8,7 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
 
   /* --- START SUBSECTION: PDF Worker Configuration --- */
   // Use a static local worker file so pdf.js does not attempt a dynamic fetch while offline.
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("/pdf.worker.min.js", window.location.origin).toString();
   /* --- END SUBSECTION: PDF Worker Configuration --- */
 
   /* --- START SUBSECTION: PDFViewer Component Main --- */
@@ -17,7 +17,8 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
     const [numPages, setNumPages] = useState(null);
     const [error, setError] = useState(false);
     const [width, setWidth] = useState(700);
-    const [loadingProgress, setLoadingProgress] = useState(0);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadingProgress, setLoadingProgress] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [resumePage, setResumePage] = useState(null);
     const [bookmarkLoaded, setBookmarkLoaded] = useState(false);
@@ -41,15 +42,13 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
     useEffect(() => {
       setError(false);
       setNumPages(null);
-      setLoadingProgress(15);
+      setIsLoading(true);
+      setLoadingProgress(null);
       setCurrentPage(1);
       setResumePage(null);
       setBookmarkLoaded(false);
       setResumeMessage("");
-      const progressInterval = window.setInterval(() => {
-        setLoadingProgress((previous) => previous < 90 ? previous + 15 : previous);
-      }, 150);
-      return () => window.clearInterval(progressInterval);
+      return undefined;
     }, [fileUrl]);
 
     useEffect(() => {
@@ -122,10 +121,19 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
     /* --- START FILE VALIDATION --- */
     const documentFile = useMemo(() => (
       typeof fileUrl === "string" && fileUrl.trim()
-        ? { url: fileUrl, rangeChunkSize: 65536, disableAutoFetch: false, disableStream: false }
+        ? {
+            url: fileUrl,
+            // Small initial ranges reduce time-to-first-byte on high-latency networks.
+            rangeChunkSize: 65536,
+            disableAutoFetch: false,
+            disableStream: false,
+            disablePageLoading: false,
+          }
         : null
     ), [fileUrl]);
     /* --- END FILE VALIDATION --- */
+
+    const loadingLabel = `جارٍ التحميل...${loadingProgress !== null ? ` ${loadingProgress}%` : ""}`;
 
     return (
       <>
@@ -139,11 +147,11 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
               onLoadSuccess={onDocumentLoadSuccess}
               onLoadProgress={({ loaded, total }) => {
                 if (total > 0) {
-                  setLoadingProgress((previous) => Math.max(previous, Math.min(99, Math.round((loaded / total) * 100))));
+                  setLoadingProgress(Math.round((loaded / total) * 100));
                 }
               }}
               onLoadError={onDocumentLoadError}
-              loading={<div style={{ color: "#fff", textAlign: "center", padding: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}><div style={{ fontSize: "18px", fontWeight: "500" }}>جارٍ تحميل المستند...</div><div style={{ fontSize: "16px", color: "#60a5fa", fontWeight: "bold", direction: "ltr" }}>⏳ {loadingProgress > 0 ? `${loadingProgress}%` : "0%"}</div></div>}
+              loading={<div style={{ color: "#fff", padding: 24, textAlign: "center" }}>{loadingLabel}</div>}
               error={<div style={{ color: "#fff", textAlign: "center", padding: 24 }}>فشل تحميل المستند. تحقق من الرابط أو اتصال الإنترنت.</div>}
             >
               {/* --- PROGRESSIVE PAGE RENDERING: Render all pages in scrollable column --- */}
@@ -152,6 +160,10 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
                   <Page
                     pageNumber={index + 1}
                     width={width}
+                    onRenderSuccess={() => {
+                      if (index === 0) setIsLoading(false);
+                    }}
+                    loading={index === 0 && isLoading ? <div style={{ color: "#cbd5e1", padding: 24, textAlign: "center" }}>{loadingLabel}</div> : null}
                     renderTextLayer={false}
                     renderAnnotationLayer={false}
                     style={{ display: "block", margin: "0 auto", background: "#111" }}

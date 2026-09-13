@@ -291,7 +291,7 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
       </div>
       {items.length > 0 && (
         <div>
-          <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>⬆️⬇️ لتغيير الترتيب لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف • ➕ لإضافة ملف أو مجلد داخل المجلد</p>
+          <p style={{ color: T.subtext, fontSize: "12px", margin: "0 0 8px", textAlign: "center" }}>⬆️⬇️  لتغيير الترتيب • ✏️ للتعديل • 🗑️ للحذف • ➕ لإضافة ملف أو مجلد داخل المجلد</p>
           <ResourceList
             resources={items}
             setResources={setItems}
