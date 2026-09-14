@@ -15,13 +15,8 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
   const [selectedSubject, setSelectedSubject] = useState("");
 
   const getAvailableSubjects = () => {
-    const allSubs = new Set();
-    const brs = config.branches || branches;
-    brs.forEach(br => {
-      const k = `${selectedGrade}_${br}`;
-      getSubjectNames(config.subjects?.[k] || [], true).forEach(sub => allSubs.add(sub));
-    });
-    return Array.from(allSubs);
+    const subjectKey = `${selectedGrade}_${selectedBranch}`;
+    return getSubjectNames(config.subjects?.[subjectKey] || [], true);
   };
 
   const availableSubjects = getAvailableSubjects();
@@ -46,10 +41,10 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
   };
 
   useEffect(() => {
-    if (availableSubjects.length > 0 && !selectedSubject) {
-      setSelectedSubject(availableSubjects[0]);
+    if (!availableSubjects.includes(selectedSubject)) {
+      setSelectedSubject(availableSubjects[0] || "");
     }
-  }, [selectedGrade, subjectKey, availableSubjects]);
+  }, [selectedGrade, selectedBranch, JSON.stringify(availableSubjects)]);
 
   useEffect(() => {
     if (selectedSubject) setSections([...getSectionsForSubject()]);
@@ -112,10 +107,10 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
           {sections.map((sec, idx) => (
-            <div key={`${sec.name}-${idx}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "20px", padding: "6px 14px", display: "flex", alignItems: "center", gap: "6px", opacity: sec.hidden ? 0.5 : 1 }}>
+            <div key={`${sec.name}-${idx}`} style={{ background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: "24px", padding: "6px 14px", display: "flex", alignItems: "center", gap: "8px", opacity: sec.hidden ? 0.5 : 1 }}>
               <span>{sec.name}</span>
-              <button type="button" onClick={() => setSections(current => current.map((item, itemIndex) => itemIndex === idx ? { ...item, hidden: !item.hidden } : item))} title={sec.hidden ? "إظهار القسم" : "إخفاء القسم"} aria-label={sec.hidden ? `إظهار ${sec.name}` : `إخفاء ${sec.name}`} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "14px" }}>{sec.hidden ? "👁️‍🗨️" : "👁️"}</button>
-              {isSuperAdmin && <button type="button" onClick={() => setSections(current => current.filter((_, itemIndex) => itemIndex !== idx))} title="حذف القسم نهائيا" aria-label={`حذف ${sec.name}`} style={{ background: "transparent", border: "none", color: T.danger, cursor: "pointer", fontSize: "14px" }}>✕</button>}
+              <button type="button" onClick={() => setSections(current => current.map((item, itemIndex) => itemIndex === idx ? { ...item, hidden: !item.hidden } : item))} title={sec.hidden ? "إظهار القسم" : "إخفاء القسم"} aria-label={sec.hidden ? `إظهار ${sec.name}` : `إخفاء ${sec.name}`} style={{ width: "26px", height: "26px", borderRadius: "50%", border: `1px solid ${(T.accent || "#7c73f5")}55`, background: `${T.accent || "#7c73f5"}22`, color: T.accent || "#a89af5", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", cursor: "pointer", padding: 0, lineHeight: 1 }}>{sec.hidden ? "👁️‍🗨️" : "👁️"}</button>
+              {isSuperAdmin && <button type="button" onClick={() => setSections(current => current.filter((_, itemIndex) => itemIndex !== idx))} title="حذف القسم نهائيا" aria-label={`حذف ${sec.name}`} style={{ width: "26px", height: "26px", borderRadius: "50%", border: `1px solid ${(T.danger || "#ef4444")}55`, background: `${T.danger || "#ef4444"}22`, color: T.danger || "#f87171", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>}
             </div>
           ))}
         </div>
