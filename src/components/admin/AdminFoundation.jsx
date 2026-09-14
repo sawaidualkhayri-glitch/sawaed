@@ -5,6 +5,51 @@ import AddFolderModal from "../modals/AddFolderModal.jsx";
 import AddFileModal from "../modals/AddFileModal.jsx";
 import DriveImportModal from "../modals/DriveImportModal.jsx";
 
+const generateUniqueId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+function processWorkerItem(item) {
+  const isFolder = Boolean(
+    item?.isFolder
+    || item?.type === "folder"
+    || item?.mimeType === "application/vnd.google-apps.folder"
+  );
+  const driveId = item?.driveId || item?.id;
+  const itemId = generateUniqueId(isFolder ? "folder" : "item");
+
+  if (isFolder) {
+    const rawChildren = Array.isArray(item.children) ? item.children : Array.isArray(item.items) ? item.items : [];
+    const processedChildren = rawChildren.map(processWorkerItem);
+    const name = item.name || item.title || "Untitled Folder";
+    return {
+      id: itemId,
+      driveId,
+      name,
+      title: name,
+      type: "folder",
+      isFolder: true,
+      mimeType: "application/vnd.google-apps.folder",
+      children: processedChildren,
+      items: processedChildren,
+      addedAt: Date.now(),
+    };
+  }
+
+  const name = item?.name || item?.title || "Untitled File";
+  return {
+    id: itemId,
+    driveId,
+    name,
+    title: name,
+    type: item?.type || "link",
+    mimeType: item?.mimeType || "",
+    url: item?.url || `https://drive.google.com/file/d/${driveId}/view`,
+    downloadUrl: item?.downloadUrl || "",
+    description: "",
+    teacher: "",
+    addedAt: Date.now(),
+  };
+}
+
 export default function AdminFoundation({ config, saveConfig, T, onBack, normalizeFoundKey, validateRequiredFields, normalizeDriveFolderInput, extractDriveFolderId, cloudflareWorkerBaseUrl, addFolderToTree, dissolveFolderInTree }) {
   const [showAddFolderModal, setShowAddFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -128,18 +173,7 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
         throw new Error(payload?.error || "تعذر قراءة المجلد");
       }
 
-      const mappedFiles = payload.files
-        .filter(file => file && file.id && file.name)
-        .map(file => ({
-          id: `foundation_item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          title: file.name,
-          name: file.name,
-          url: `https://drive.google.com/file/d/${file.id}/view`,
-          type: file.mimeType?.includes("pdf") ? "pdf" : "link",
-          description: "",
-          teacher: "",
-          addedAt: Date.now()
-        }));
+      const mappedFiles = payload.files.filter(Boolean).map(processWorkerItem);
 
       if (mappedFiles.length === 0) {
         throw new Error("المجلد لا يحتوي على ملفات قابلة للاستيراد");
@@ -149,6 +183,7 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
         id: `foundation_folder_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         title: driveFolderName.trim() || "مجلد جديد",
         name: driveFolderName.trim() || "مجلد جديد",
+        type: "folder",
         isFolder: true,
         items: mappedFiles,
         children: mappedFiles,

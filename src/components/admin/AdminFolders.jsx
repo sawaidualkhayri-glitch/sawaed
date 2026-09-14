@@ -2,6 +2,51 @@ import { useState, useEffect } from "react";
 import AdminSection from "./AdminSection.jsx";
 import Modal from "../ui/Modal.jsx";
 
+const generateUniqueId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+function processWorkerItem(item) {
+  const isFolder = Boolean(
+    item?.isFolder
+    || item?.type === "folder"
+    || item?.mimeType === "application/vnd.google-apps.folder"
+  );
+  const driveId = item?.driveId || item?.id;
+  const itemId = generateUniqueId(isFolder ? "folder" : "item");
+
+  if (isFolder) {
+    const rawChildren = Array.isArray(item.children) ? item.children : Array.isArray(item.items) ? item.items : [];
+    const processedChildren = rawChildren.map(processWorkerItem);
+    const name = item.name || item.title || "Untitled Folder";
+    return {
+      id: itemId,
+      driveId,
+      name,
+      title: name,
+      type: "folder",
+      isFolder: true,
+      mimeType: "application/vnd.google-apps.folder",
+      children: processedChildren,
+      items: processedChildren,
+      addedAt: Date.now(),
+    };
+  }
+
+  const name = item?.name || item?.title || "Untitled File";
+  return {
+    id: itemId,
+    driveId,
+    name,
+    title: name,
+    type: item?.type || "link",
+    mimeType: item?.mimeType || "",
+    url: item?.url || `https://drive.google.com/file/d/${driveId}/view`,
+    downloadUrl: item?.downloadUrl || "",
+    description: "",
+    teacher: "",
+    addedAt: Date.now(),
+  };
+}
+
 export default function AdminFolders({ config, saveConfig, T, onBack, canonicalizeGrade, canonicalizeBranch, normalizeFolderKey, getFolderKeyCandidates, getSubjectsByGradeBranch, fbGet, fbSet, extractDriveFolderId, cloudflareWorkerBaseUrl, dissolveFolderInTree }) {
   const grades = config.grades || [];
   const branches = config.branches || [];
@@ -63,12 +108,24 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   }, [subjectKey, JSON.stringify(availableSubjects)]);
 
   const [folderData, setFolderData] = useState([]);
-  const createItemId = (prefix = "item") => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const createItemId = (prefix = "item") => generateUniqueId(prefix);
   const normalizeItemTree = (items) => {
     if (!Array.isArray(items)) return [];
     return items.map(item => {
       if (!item || typeof item !== "object") return item;
-      if (item.type === "folder") return { ...item, id: item.id || createItemId("folder"), children: normalizeItemTree(item.children || []) };
+      const isFolder = item.type === "folder" || item.isFolder || item.mimeType === "application/vnd.google-apps.folder";
+      if (isFolder) {
+        const rawList = Array.isArray(item.children) ? item.children : Array.isArray(item.items) ? item.items : [];
+        const normalizedSub = normalizeItemTree(rawList);
+        return {
+          ...item,
+          id: item.id || createItemId("folder"),
+          type: "folder",
+          isFolder: true,
+          children: normalizedSub,
+          items: normalizedSub,
+        };
+      }
       return { ...item, id: item.id || createItemId("file") };
     });
   };
@@ -167,9 +224,10 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
       const response = await fetch(`${workerBaseUrl}/list-folder?folderId=${encodeURIComponent(folderId)}`); let payload = null;
       try { payload = await response.json(); } catch { throw new Error("لم يتمكن الخادم من إرجاع بيانات صحيحة"); }
       if (!response.ok || !payload?.success || !Array.isArray(payload.files)) throw new Error(payload?.error || "تعذر قراءة المجلد");
-      const mappedFiles = payload.files.filter(file => file?.id && file?.name).map(file => ({ id: createItemId("file"), type: file.mimeType?.includes("pdf") ? "pdf" : file.mimeType?.includes("image") ? "image" : "link", name: file.name, title: file.name, url: `https://drive.google.com/file/d/${file.id}/view`, description: "", teacher: "", addedAt: Date.now() }));
+      const mappedFiles = payload.files.filter(Boolean).map(processWorkerItem);
       if (mappedFiles.length === 0) throw new Error("المجلد لا يحتوي على ملفات قابلة للاستيراد");
-      const newFolder = { id: createItemId("folder"), type: "folder", name: driveFolderName.trim(), children: mappedFiles };
+      const folderName = driveFolderName.trim() || "New Folder";
+      const newFolder = { id: createItemId("folder"), name: folderName, title: folderName, type: "folder", isFolder: true, children: mappedFiles, items: mappedFiles };
       await saveFolderData([...folderData, newFolder]); resetDriveFolderModal(); alert("تم استيراد المجلد بنجاح!");
     } catch (error) { console.error("Failed to import Google Drive folder:", error); alert("تعذر استيراد المجلد. تأكد من أن المجلد مضبوط على Anyone with the link can view وأن الرابط صحيح."); } finally { setIsImportingDriveFolder(false); }
   };
