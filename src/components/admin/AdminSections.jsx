@@ -3,7 +3,7 @@ import AdminSection from "./AdminSection.jsx";
 
 const DEFAULT_SECTIONS = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
 
-export default function AdminSections({ config, saveConfig, T, onBack, getSubjectNames }) {
+export default function AdminSections({ config, saveConfig, T, onBack, getSubjectNames, role }) {
   const [sections, setSections] = useState([]);
   const [newSec, setNewSec] = useState("");
 
@@ -33,11 +33,16 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
   };
 
   const subjectKey = getSubjectKey();
+  const isSuperAdmin = role === "super_admin" || role === "superadmin";
+
+  const normalizeSections = (value) => (Array.isArray(value) ? value : DEFAULT_SECTIONS)
+    .map(section => typeof section === "string" ? { name: section, hidden: false } : { name: String(section?.name || "").trim(), hidden: section?.hidden === true })
+    .filter(section => section.name);
 
   const getSectionsForSubject = () => {
     const storedSections = config.subjectSections;
-    if (Array.isArray(storedSections)) return storedSections;
-    return storedSections?.[subjectKey]?.[selectedSubject] || DEFAULT_SECTIONS;
+    if (Array.isArray(storedSections)) return normalizeSections(storedSections);
+    return normalizeSections(storedSections?.[subjectKey]?.[selectedSubject]);
   };
 
   useEffect(() => {
@@ -98,7 +103,7 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
           <input value={newSec} onChange={e => setNewSec(e.target.value)} placeholder="اسم القسم الجديد..." style={inp} />
           <button onClick={() => {
             if (newSec.trim()) {
-              const updated = [...sections, newSec.trim()];
+              const updated = [...sections, { name: newSec.trim(), hidden: false }];
               setSections(updated);
               setNewSec("");
             }
@@ -107,12 +112,10 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
           {sections.map((sec, idx) => (
-            <div key={idx} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "20px", padding: "6px 14px", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>{sec}</span>
-              <button onClick={() => {
-                const updated = sections.filter((_, i) => i !== idx);
-                setSections(updated);
-              }} style={{ background: "transparent", border: "none", color: T.danger, cursor: "pointer", fontSize: "14px" }}>✕</button>
+            <div key={`${sec.name}-${idx}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "20px", padding: "6px 14px", display: "flex", alignItems: "center", gap: "6px", opacity: sec.hidden ? 0.5 : 1 }}>
+              <span>{sec.name}</span>
+              <button type="button" onClick={() => setSections(current => current.map((item, itemIndex) => itemIndex === idx ? { ...item, hidden: !item.hidden } : item))} title={sec.hidden ? "إظهار القسم" : "إخفاء القسم"} aria-label={sec.hidden ? `إظهار ${sec.name}` : `إخفاء ${sec.name}`} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: "14px" }}>{sec.hidden ? "👁️‍🗨️" : "👁️"}</button>
+              {isSuperAdmin && <button type="button" onClick={() => setSections(current => current.filter((_, itemIndex) => itemIndex !== idx))} title="حذف القسم نهائيا" aria-label={`حذف ${sec.name}`} style={{ background: "transparent", border: "none", color: T.danger, cursor: "pointer", fontSize: "14px" }}>✕</button>}
             </div>
           ))}
         </div>

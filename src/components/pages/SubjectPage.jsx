@@ -73,9 +73,13 @@ export default function SubjectPage({ config, saveConfig, T, darkMode, currentUs
 
   const defaultSections = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
   const storedSections = config.subjectSections;
-  const sections = Array.isArray(storedSections)
+  const rawSections = Array.isArray(storedSections)
     ? storedSections
     : storedSections?.[subjectKey]?.[sub] || defaultSections;
+  const sections = rawSections
+    .map(section => typeof section === "string" ? { name: section, hidden: false } : { name: String(section?.name || "").trim(), hidden: section?.hidden === true })
+    .filter(section => section.name && !section.hidden)
+    .map(section => section.name);
 
   const toggleLesson = async (l) => {
     const arr = [...doneLessons];

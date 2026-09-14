@@ -38,9 +38,10 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   };
   const subjectKey = getSubjectKey();
   const storedSections = config.subjectSections;
-  const sectionsList = Array.isArray(storedSections)
+  const rawSectionsList = Array.isArray(storedSections)
     ? storedSections
     : storedSections?.[subjectKey]?.[selectedSubject] || defaultSections;
+  const sectionsList = rawSectionsList.map(section => typeof section === "string" ? section : section?.name).filter(Boolean);
   const [selectedSection, setSelectedSection] = useState(sectionsList[0] || "");
   const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
   const storageKey = (selectedSubject && selectedSection) ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) : "";
