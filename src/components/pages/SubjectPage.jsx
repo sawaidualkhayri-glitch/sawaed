@@ -71,7 +71,11 @@ export default function SubjectPage({ config, saveConfig, T, darkMode, currentUs
   const [celebrated, setCelebrated] = useState(false);
   const [showLessons, setShowLessons] = useState(false);
 
-  const sections = config.subjectSections || [];
+  const defaultSections = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
+  const storedSections = config.subjectSections;
+  const sections = Array.isArray(storedSections)
+    ? storedSections
+    : storedSections?.[subjectKey]?.[sub] || defaultSections;
 
   const toggleLesson = async (l) => {
     const arr = [...doneLessons];

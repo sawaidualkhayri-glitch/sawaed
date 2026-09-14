@@ -26,8 +26,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const [editItemForm, setEditItemForm] = useState({ title: "", url: "", type: "link" });
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [selectedFileIds, setSelectedFileIds] = useState([]);
-  const sectionsList = config.subjectSections || ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
-  const [selectedSection, setSelectedSection] = useState(sectionsList[0] || "");
+  const defaultSections = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
 
   const getSubjectKey = () => {
     if (!selectedGrade || !selectedBranch) return "";
@@ -38,10 +37,19 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     return `${canonicalSelectedGrade}_${canonicalSelectedBranch}_${semesterKey}`;
   };
   const subjectKey = getSubjectKey();
+  const storedSections = config.subjectSections;
+  const sectionsList = Array.isArray(storedSections)
+    ? storedSections
+    : storedSections?.[subjectKey]?.[selectedSubject] || defaultSections;
+  const [selectedSection, setSelectedSection] = useState(sectionsList[0] || "");
   const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
   const storageKey = (selectedSubject && selectedSection) ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) : "";
 
   const availableSubjects = getSubjectsByGradeBranch(config.subjects, selectedGrade, selectedBranch, false);
+
+  useEffect(() => {
+    setSelectedSection(current => sectionsList.includes(current) ? current : (sectionsList[0] || ""));
+  }, [subjectKey, selectedSubject, JSON.stringify(sectionsList)]);
 
   useEffect(() => {
     const isG11 = canonicalizeGrade(selectedGrade).includes("حادي عشر");

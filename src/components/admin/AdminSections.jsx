@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import AdminSection from "./AdminSection.jsx";
 
+const DEFAULT_SECTIONS = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
+
 export default function AdminSections({ config, saveConfig, T, onBack, getSubjectNames }) {
-  const [sections, setSections] = useState([...(config.subjectSections || [])]);
+  const [sections, setSections] = useState([]);
   const [newSec, setNewSec] = useState("");
 
   const grades = config.grades || [];
@@ -32,17 +34,40 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
 
   const subjectKey = getSubjectKey();
 
+  const getSectionsForSubject = () => {
+    const storedSections = config.subjectSections;
+    if (Array.isArray(storedSections)) return storedSections;
+    return storedSections?.[subjectKey]?.[selectedSubject] || DEFAULT_SECTIONS;
+  };
+
   useEffect(() => {
     if (availableSubjects.length > 0 && !selectedSubject) {
       setSelectedSubject(availableSubjects[0]);
     }
   }, [selectedGrade, subjectKey, availableSubjects]);
 
+  useEffect(() => {
+    if (selectedSubject) setSections([...getSectionsForSubject()]);
+  }, [selectedSubject, subjectKey]);
+
+  const saveSections = () => {
+    if (!selectedSubject || !subjectKey) return saveConfig(config);
+    const storedSections = Array.isArray(config.subjectSections) ? {} : (config.subjectSections || {});
+    const updatedSubjectSections = {
+      ...storedSections,
+      [subjectKey]: {
+        ...(storedSections[subjectKey] || {}),
+        [selectedSubject]: sections,
+      },
+    };
+    return saveConfig({ ...config, subjectSections: updatedSubjectSections });
+  };
+
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "14px", color: T.text, flex: 1, outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl" };
   const selectStyle = { ...inp, flex: "unset", width: "100%", marginBottom: "8px" };
 
   return (
-    <AdminSection title="أقسام المادة" icon="📑" T={T} onBack={onBack} onSave={() => saveConfig({ ...config, subjectSections: sections })}>
+    <AdminSection title="أقسام المادة" icon="📑" T={T} onBack={onBack} onSave={saveSections}>
       <p style={{ color: T.subtext, fontSize: "13px", margin: "0 0 14px" }}>اختر الصف والفرع والفصل والمادة ثم أضف الأقسام. (تم الإصلاح: كل المواد مرئية عبر الفروع والفصول)</p>
 
       <select value={selectedGrade} onChange={e => { setSelectedGrade(e.target.value); setSelectedSubject(""); }} style={selectStyle}>
