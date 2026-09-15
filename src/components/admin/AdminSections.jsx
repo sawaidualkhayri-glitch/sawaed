@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import AdminSection from "./AdminSection.jsx";
 import IconSelect from "../ui/IconSelect.jsx";
-import { getSectionIcon, getSubjectIcon } from "../../utils/dropdownIcons.js";
+import { DEFAULT_SECTION_ICONS, getSubjectIcon } from "../../utils/dropdownIcons.js";
 
 const DEFAULT_SECTIONS = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
 
@@ -42,6 +42,23 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
     return normalizeSections(storedSections?.[subjectKey]?.[selectedSubject]);
   };
 
+  const buildSectionsWithNewName = (currentSections, sectionName) => {
+    if (currentSections.some(section => section.name === sectionName)) return currentSections;
+    return [...currentSections, { name: sectionName, hidden: false }];
+  };
+
+  const updateAllSubjectSections = (sectionName) => {
+    const storedSections = Array.isArray(config.subjectSections) ? {} : (config.subjectSections || {});
+    const updatedSubjectSections = { ...storedSections, [subjectKey]: { ...(storedSections[subjectKey] || {}) } };
+    availableSubjects.forEach(subjectName => {
+      const subjectSections = normalizeSections(storedSections[subjectKey]?.[subjectName]);
+      updatedSubjectSections[subjectKey][subjectName] = buildSectionsWithNewName(subjectSections, sectionName);
+    });
+    setSections(updatedSubjectSections[subjectKey][selectedSubject] || []);
+    setNewSec("");
+    return saveConfig({ ...config, subjectSections: updatedSubjectSections });
+  };
+
   useEffect(() => {
     if (!availableSubjects.includes(selectedSubject)) {
       setSelectedSubject(availableSubjects[0] || "");
@@ -66,7 +83,9 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
   };
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "14px", color: T.text, flex: 1, outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl" };
-  const selectStyle = { ...inp, flex: "unset", width: "100%", marginBottom: "8px" };
+  const dropdownBackground = "#302d59";
+  const dropdownOptionStyle = { backgroundColor: dropdownBackground, color: "#fff" };
+  const selectStyle = { ...inp, flex: "unset", width: "100%", marginBottom: "8px", background: dropdownBackground, backgroundColor: dropdownBackground, color: "#fff", position: "relative", zIndex: 20 };
   const subjectOptions = availableSubjects.map(subjectName => ({ value: subjectName, label: subjectName, icon: getSubjectIcon(config, subjectName) }));
 
   return (
@@ -74,17 +93,17 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
       <p style={{ color: T.subtext, fontSize: "13px", margin: "0 0 14px" }}>اختر الصف والفرع والفصل والمادة ثم أضف الأقسام. (تم الإصلاح: كل المواد مرئية عبر الفروع والفصول)</p>
 
       <select value={selectedGrade} onChange={e => setSelectedGrade(e.target.value)} style={selectStyle}>
-        {grades.map(g => <option key={g} value={g}>{g}</option>)}
+        {grades.map(g => <option key={g} value={g} style={dropdownOptionStyle}>{g}</option>)}
       </select>
 
       <select value={selectedBranch} onChange={e => setSelectedBranch(e.target.value)} style={selectStyle}>
-        {branches.map(b => <option key={b} value={b}>{b}</option>)}
+        {branches.map(b => <option key={b} value={b} style={dropdownOptionStyle}>{b}</option>)}
       </select>
 
       {selectedGrade.includes("حادي عشر") && (
         <select value={selectedSemester} onChange={e => setSelectedSemester(e.target.value)} style={selectStyle}>
-          <option value="فصل أول">فصل أول</option>
-          <option value="فصل ثان">فصل ثان</option>
+          <option value="فصل أول" style={dropdownOptionStyle}>فصل أول</option>
+          <option value="فصل ثان" style={dropdownOptionStyle}>فصل ثان</option>
         </select>
       )}
 
@@ -95,17 +114,20 @@ export default function AdminSections({ config, saveConfig, T, onBack, getSubjec
           <input value={newSec} onChange={e => setNewSec(e.target.value)} placeholder="اسم القسم الجديد..." style={inp} />
           <button onClick={() => {
             if (newSec.trim()) {
-              const updated = [...sections, { name: newSec.trim(), hidden: false }];
+              const updated = buildSectionsWithNewName(sections, newSec.trim());
               setSections(updated);
               setNewSec("");
             }
           }} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 20px", cursor: "pointer" }}>إضافة</button>
+          <button type="button" onClick={() => {
+            if (newSec.trim() && subjectKey && availableSubjects.length > 0) updateAllSubjectSections(newSec.trim());
+          }} style={{ background: dropdownBackground, color: "#fff", border: `1px solid ${T.accent}`, borderRadius: "10px", padding: "10px 16px", cursor: "pointer", whiteSpace: "nowrap" }}>إضافة لكل المواد</button>
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
           {sections.map((sec, idx) => (
             <div key={`${sec.name}-${idx}`} style={{ background: T.card, border: `1.5px solid ${T.cardBorder}`, borderRadius: "24px", padding: "6px 14px", display: "flex", alignItems: "center", gap: "8px", opacity: sec.hidden ? 0.5 : 1 }}>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><span aria-hidden="true">{getSectionIcon(sec.name)}</span><span>{sec.name}</span></span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}><span aria-hidden="true">{DEFAULT_SECTION_ICONS[sec.name] || ""}</span><span>{sec.name}</span></span>
               <button type="button" onClick={() => setSections(current => current.map((item, itemIndex) => itemIndex === idx ? { ...item, hidden: !item.hidden } : item))} title={sec.hidden ? "إظهار القسم" : "إخفاء القسم"} aria-label={sec.hidden ? `إظهار ${sec.name}` : `إخفاء ${sec.name}`} style={{ width: "26px", height: "26px", borderRadius: "50%", border: `1px solid ${(T.accent || "#7c73f5")}55`, background: `${T.accent || "#7c73f5"}22`, color: T.accent || "#a89af5", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", cursor: "pointer", padding: 0, lineHeight: 1 }}>{sec.hidden ? "👁️‍🗨️" : "👁️"}</button>
               {isSuperAdmin && <button type="button" onClick={() => setSections(current => current.filter((_, itemIndex) => itemIndex !== idx))} title="حذف القسم نهائيا" aria-label={`حذف ${sec.name}`} style={{ width: "26px", height: "26px", borderRadius: "50%", border: `1px solid ${(T.danger || "#ef4444")}55`, background: `${T.danger || "#ef4444"}22`, color: T.danger || "#f87171", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "12px", cursor: "pointer", padding: 0, lineHeight: 1 }}>✕</button>}
             </div>
