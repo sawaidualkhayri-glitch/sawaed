@@ -25,7 +25,7 @@ export default function IconSelect({ value, options = [], onChange, style = {}, 
         style={{ ...style, width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", cursor: disabled || options.length === 0 ? "not-allowed" : "pointer", textAlign: "right" }}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-          <span aria-hidden="true" style={{ fontSize: "18px", lineHeight: 1, flexShrink: 0 }}>{selected?.icon || "📌"}</span>
+          {selected?.icon && <span aria-hidden="true" style={{ fontSize: "18px", lineHeight: 1, flexShrink: 0 }}>{selected.icon}</span>}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected?.label || "لا توجد خيارات"}</span>
         </span>
         <span aria-hidden="true" style={{ fontSize: "12px", flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
@@ -41,7 +41,7 @@ export default function IconSelect({ value, options = [], onChange, style = {}, 
               onClick={() => { onChange?.(option.value); setOpen(false); }}
               style={{ width: "100%", display: "flex", alignItems: "center", gap: "8px", direction: "rtl", background: option.value === value ? "rgba(127,127,127,0.18)" : "transparent", border: "none", borderRadius: "8px", color: style.color || "inherit", padding: "9px 10px", cursor: "pointer", textAlign: "right", fontFamily: style.fontFamily || "inherit", fontSize: style.fontSize || "13px" }}
             >
-              <span aria-hidden="true" style={{ fontSize: "18px", lineHeight: 1, flexShrink: 0 }}>{option.icon || "📌"}</span>
+              {option.icon && <span aria-hidden="true" style={{ fontSize: "18px", lineHeight: 1, flexShrink: 0 }}>{option.icon}</span>}
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{option.label}</span>
             </button>
           ))}

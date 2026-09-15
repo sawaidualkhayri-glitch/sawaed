@@ -1070,7 +1070,7 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
           <button onClick={navigateBack} style={{ background: T.accent, color: "#fff", border: "none", borderRadius: "12px", padding: "8px 18px", fontSize: "14px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>← رجوع</button>
           {canEditStructure && <button onClick={() => setEditorMode(e => !e)} style={{ background: editorMode ? "#238636" : `${T.accent}22`, border: `1px solid ${editorMode ? "#238636" : T.accent}`, color: editorMode ? "#fff" : T.accent, borderRadius: "12px", padding: "8px 14px", fontSize: "13px", fontWeight: "700", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>{editorMode ? "✅ وضع التحرير" : "✏️ تحرير"}</button>}
         </div>
-        <h2 style={{ margin: "8px 0 0", color: T.text, fontSize: "19px", fontWeight: "800" }}>{config.subjectIcons?.[subject] || EMOJI[subject] || "📌"} {subject}</h2>
+        <h2 style={{ margin: "8px 0 0", color: T.text, fontSize: "19px", fontWeight: "800" }}>{(config.subjectIcons?.[subject] || EMOJI[subject]) && <span>{config.subjectIcons?.[subject] || EMOJI[subject]} </span>}{subject}</h2>
         <p style={{ margin: "2px 0 0", fontSize: "12px", color: T.subtext }}>{grade} --- {branch} {semester} - {section}</p>
         {renderBreadcrumb()}
       </div>

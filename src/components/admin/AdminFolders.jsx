@@ -123,7 +123,10 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     document.querySelectorAll("select").forEach(select => {
       select.querySelectorAll("option").forEach(option => {
         if (subjectSet.has(option.value)) option.textContent = `${getSubjectIcon(config, option.value)} ${option.value}`;
-        if (sectionSet.has(option.value)) option.textContent = `${getSectionIcon(option.value)} ${option.value}`;
+        if (sectionSet.has(option.value)) {
+          const sectionIcon = getSectionIcon(option.value);
+          option.textContent = sectionIcon ? `${sectionIcon} ${option.value}` : option.value;
+        }
       });
     });
   }, [config, availableSubjects.join("|"), sectionsList.join("|"), selectedSubject, selectedSection]);

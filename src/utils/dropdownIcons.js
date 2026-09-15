@@ -7,9 +7,9 @@ export const DEFAULT_SECTION_ICONS = {
 };
 
 export function getSubjectIcon(config, name) {
-  return config?.subjectIcons?.[name] || DEFAULT_SUBJECT_ICONS[name] || "📌";
+  return config?.subjectIcons?.[name] || DEFAULT_SUBJECT_ICONS[name] || "";
 }
 
 export function getSectionIcon(name) {
-  return DEFAULT_SECTION_ICONS[name] || "📌";
+  return DEFAULT_SECTION_ICONS[name] || "";
 }
