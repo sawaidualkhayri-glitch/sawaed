@@ -86,10 +86,19 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   };
   const subjectKey = getSubjectKey();
   const storedSections = config.subjectSections;
-  const rawSectionsList = Array.isArray(storedSections)
+  const legacySubjectKey = `${selectedGrade}_${selectedBranch}_${canonicalizeGrade(selectedGrade).includes("حادي عشر") ? selectedSemester : "فصل واحد"}`;
+  const subjectSectionConfig = Array.isArray(storedSections)
     ? storedSections
-    : storedSections?.[subjectKey]?.[selectedSubject] || defaultSections;
-  const sectionsList = rawSectionsList.map(section => typeof section === "string" ? section : section?.name).filter(Boolean);
+    : storedSections?.[subjectKey]?.[selectedSubject] !== undefined
+      ? storedSections[subjectKey][selectedSubject]
+      : storedSections?.[legacySubjectKey]?.[selectedSubject];
+  const hasSavedSubjectSections = Array.isArray(storedSections)
+    || storedSections?.[subjectKey]?.[selectedSubject] !== undefined
+    || storedSections?.[legacySubjectKey]?.[selectedSubject] !== undefined;
+  const sectionsList = (Array.isArray(hasSavedSubjectSections ? subjectSectionConfig : defaultSections) ? (hasSavedSubjectSections ? subjectSectionConfig : defaultSections) : [])
+    .map(section => typeof section === "string" ? { name: section, hidden: false } : { name: String(section?.name || "").trim(), hidden: section?.hidden === true })
+    .filter(section => section.name && !section.hidden)
+    .map(section => section.name);
   const [selectedSection, setSelectedSectionState] = useState(sectionsList[0] || "");
   const pendingSectionResetRef = useRef(false);
   const setSelectedSubject = (value) => {
