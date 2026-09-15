@@ -13,6 +13,10 @@ function formatAuthError(error) {
     case "auth/email-already-in-use": return "هذا البريد الإلكتروني مستخدم بالفعل.";
     case "auth/weak-password": return "كلمة السر ضعيفة. استخدم 6 أحرف على الأقل.";
     case "auth/popup-closed-by-user": return "تم إغلاق نافذة Google قبل اكتمال الدخول.";
+      case "auth/popup-blocked": return "تم حظر نافذة Google. اسمح بالنوافذ المنبثقة لهذا الموقع ثم حاول مرة أخرى.";
+      case "auth/cancelled-popup-request": return "يوجد طلب دخول Google آخر قيد التنفيذ. أغلق النافذة السابقة وحاول مرة أخرى.";
+      case "auth/operation-not-allowed": return "تسجيل الدخول بواسطة Google غير مفعّل في إعدادات Firebase.";
+      case "auth/unauthorized-domain": return "هذا النطاق غير مضاف إلى Authorized domains في Firebase.";
     case "auth/username-not-found": return "اسم المستخدم غير موجود.";
     default: return error.message || "حدث خطأ. حاول مرة أخرى.";
   }
