@@ -362,6 +362,11 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
     };
   }, [fileId, isBlobDirect, url]);
 
+  useEffect(() => {
+    setUseIframeFallback(false);
+    setIframeFileId(null);
+  }, [url]);
+
   const handleSaveOffline = async () => {
     if (isSavedOffline) return;
     setSaveFeedback(null);
@@ -516,7 +521,19 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
       ) : (
         isPdf ? (
           <div style={{ flex: 1, overflowY: "auto", maxHeight: "calc(100vh - 100px)", background: "#111", padding: "18px" }}>
-            <PDFViewer fileUrl={isSavedOffline && localUrl ? localUrl : pdfSource(url)} title={title || "PDF Document"} fileId={fileId} />
+            <PDFViewer
+              fileUrl={isSavedOffline && localUrl ? localUrl : pdfSource(url)}
+              title={title || "PDF Document"}
+              fileId={fileId}
+              onFallback={() => {
+                const driveId = extractDriveId(url);
+                if (driveId && !isSavedOffline) {
+                  console.warn("Direct PDF stream failed, falling back to Drive embed preview:", url);
+                  setIframeFileId(driveId);
+                  setUseIframeFallback(true);
+                }
+              }}
+            />
           </div>
         ) : isImageContent ? (
           <div style={{ flex: "1 1 0%", display: "flex", alignItems: "center", justifyContent: "center", background: "#000", width: "100%", height: "100%", minHeight: "0px", minWidth: "0px", overflow: "auto", padding: "16px", boxSizing: "border-box" }}>

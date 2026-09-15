@@ -12,7 +12,7 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
   /* --- END SUBSECTION: PDF Worker Configuration --- */
 
   /* --- START SUBSECTION: PDFViewer Component Main --- */
-  export default function PDFViewer({ fileUrl, title, fileId }) {
+  export default function PDFViewer({ fileUrl, title, fileId, onFallback }) {
     /* --- START STATE MANAGEMENT --- */
     const [numPages, setNumPages] = useState(null);
     const [error, setError] = useState(false);
@@ -115,6 +115,7 @@ import { getPdfBookmark, savePdfBookmark } from "./utils/bookmarksDB.js";
     function onDocumentLoadError(err) {
       console.error("PDF document load failed:", err);
       setError(true);
+      onFallback?.(err);
     }
     /* --- END PDF LOAD ERROR HANDLER --- */
 
