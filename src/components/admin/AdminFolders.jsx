@@ -91,15 +91,17 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     : storedSections?.[subjectKey]?.[selectedSubject] || defaultSections;
   const sectionsList = rawSectionsList.map(section => typeof section === "string" ? section : section?.name).filter(Boolean);
   const [selectedSection, setSelectedSectionState] = useState(sectionsList[0] || "");
-  const previousSubjectRef = useRef(selectedSubject);
+  const pendingSectionResetRef = useRef(false);
   const setSelectedSubject = (value) => {
+    pendingSectionResetRef.current = true;
     if (value !== "") setSelectedSubjectState(value);
   };
   const setSelectedSection = (value) => {
-    const automaticSubjectReset = value === sectionsList[0]
-      && selectedSection !== value
-      && selectedSubject !== previousSubjectRef.current;
-    if (!automaticSubjectReset) setSelectedSectionState(value);
+    if (pendingSectionResetRef.current) {
+      pendingSectionResetRef.current = false;
+      return;
+    }
+    setSelectedSectionState(value);
   };
   const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
   const storageKey = (selectedSubject && selectedSection) ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) : "";
@@ -119,21 +121,15 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
 
   useEffect(() => {
     setSelectedSectionState(current => sectionsList.includes(current) ? current : (sectionsList[0] || ""));
-  }, [subjectKey, selectedSubject, JSON.stringify(sectionsList)]);
-
-  useEffect(() => {
-    previousSubjectRef.current = selectedSubject;
-  }, [selectedSubject]);
+  }, [selectedSubject, sectionsList.join("|")]);
 
   useEffect(() => {
     const isG11 = canonicalizeGrade(selectedGrade).includes("حادي عشر");
     if (isG11 && !["فصل أول", "فصل ثان"].includes(selectedSemester)) setSelectedSemester("فصل أول");
   }, [selectedGrade]);
   useEffect(() => {
-    if (availableSubjects.length > 0) {
-      if (!availableSubjects.includes(selectedSubject)) setSelectedSubject(availableSubjects[0]);
-    } else setSelectedSubjectState("");
-  }, [subjectKey, JSON.stringify(availableSubjects)]);
+    setSelectedSubjectState(current => availableSubjects.includes(current) ? current : (availableSubjects[0] || ""));
+  }, [availableSubjects.join("|")]);
 
   const [folderData, setFolderData] = useState([]);
   const createItemId = (prefix = "item") => generateUniqueId(prefix);

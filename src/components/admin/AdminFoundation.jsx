@@ -82,6 +82,26 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
 
   useEffect(() => { const raw = config[foundKey]; setItems(raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : []); }, [foundKey]);
 
+  useEffect(() => {
+    const subjects = config.foundationSubjects || [];
+    setSelSub(current => subjects.includes(current) ? current : (subjects[0] || ""));
+  }, [JSON.stringify(config.foundationSubjects || [])]);
+
+  useEffect(() => {
+    const branches = config.foundationBranches?.[selSub] || [];
+    setSelBranch(current => branches.includes(current) ? current : (branches[0] || ""));
+  }, [selSub, JSON.stringify(config.foundationBranches || {})]);
+
+  useEffect(() => {
+    const types = Object.keys(config.foundationTypes || {});
+    setSelType(current => types.includes(current) ? current : (types[0] || ""));
+  }, [JSON.stringify(config.foundationTypes || {})]);
+
+  useEffect(() => {
+    const areas = config.foundationTypes?.[selType] || [];
+    setSelArea(current => areas.includes(current) ? current : (areas[0] || ""));
+  }, [selType, JSON.stringify(config.foundationTypes || {})]);
+
   const save = async (newItems) => {
     await saveConfig({ ...config, [foundKey]: JSON.stringify(newItems) });
     setItems(newItems);
@@ -100,15 +120,11 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
   };
 
   const handleFoundationSubjectChange = (nextSubject) => {
-    const nextBranches = config.foundationBranches?.[nextSubject] || [];
     setSelSub(nextSubject);
-    if (nextBranches.length > 0 && !nextBranches.includes(selBranch)) setSelBranch(nextBranches[0]);
   };
 
   const handleFoundationTypeChange = (nextType) => {
-    const nextAreas = config.foundationTypes?.[nextType] || [];
     setSelType(nextType);
-    if (!nextAreas.includes(selArea)) setSelArea(nextAreas[0] || "");
   };
 
   const appendFileToFolderById = (list, folderId, newFile) => {
