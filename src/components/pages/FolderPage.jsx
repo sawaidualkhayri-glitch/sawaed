@@ -511,7 +511,7 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
             return;
           }
           if (fbQuery) {
-            const v2Items = await fbQuery("folder_items_v2", { where: [{ fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } }] });
+            const v2Items = await fbQuery("folder_items_v2", { where: { fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } } });
             if (Array.isArray(v2Items) && v2Items.length > 0) {
               const tree = rebuildV2FolderTree(v2Items);
               await idbSaveFolderTree(storageKey, remoteVersion, tree);

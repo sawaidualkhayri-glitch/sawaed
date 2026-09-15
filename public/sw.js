@@ -62,6 +62,20 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Let the browser handle Google assets directly. Do not turn transient
+  // Google/CDN failures into synthetic 503 responses from this worker.
+  if (
+    url.hostname === "drive.google.com" ||
+    url.hostname.endsWith(".google.com") ||
+    url.hostname === "googleusercontent.com" ||
+    url.hostname.endsWith(".googleusercontent.com") ||
+    url.hostname === "fonts.gstatic.com" ||
+    url.hostname === "www.gstatic.com" ||
+    url.hostname === "www.googletagmanager.com"
+  ) {
+    return;
+  }
+
   // Pass through proxy / Cloudflare / API requests directly to the network.
   // This avoids service worker lockups and Pending fetch states on worker requests.
   if (

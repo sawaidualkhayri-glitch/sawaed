@@ -255,7 +255,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
       if (!storageKey) { setFolderData([]); return; }
       try {
         if (fbQuery) {
-          const v2Items = await fbQuery("folder_items_v2", { where: [{ fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } }] });
+          const v2Items = await fbQuery("folder_items_v2", { where: { fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } } });
           if (Array.isArray(v2Items) && v2Items.length > 0) {
             if (!cancelled) { setFolderData(rebuildV2Tree(v2Items)); setUsingV2(true); }
             return;
