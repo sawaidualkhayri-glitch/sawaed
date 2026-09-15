@@ -3,12 +3,13 @@
    ========================================================================== */
 
 import React from 'react';
+import { isImageFile, isPdfFile } from './utils/fileType.js';
 
   /* --- START SUBSECTION: FileCard Component --- */
   export default function FileCard({ item, onClick, T, darkMode }) {
     /* --- START FILE TYPE DETECTION --- */
-    const isPdf = item?.url?.toLowerCase().includes('.pdf') || item?.type?.toLowerCase().includes('pdf') || item?.title?.toLowerCase().includes('.pdf');
-    const isImage = item?.url?.toLowerCase().match(/\.(png|jpe?g|webp|gif)/) || item?.type?.toLowerCase().includes('image');
+    const isPdf = isPdfFile(item, item?.mimeType);
+    const isImage = isImageFile(item, item?.mimeType);
     const icon = isPdf ? '📄' : isImage ? '🖼️' : '📁';
     /* --- END FILE TYPE DETECTION --- */
 

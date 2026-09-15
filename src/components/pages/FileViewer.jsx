@@ -3,6 +3,7 @@ import PDFViewer from "../../PDFViewer.jsx";
 import { cloudflareWorkerBaseUrl } from "../../config.js";
 import { fetchBinaryBlob } from "../../utils/downloadUtils.js";
 import { getLessonNote, saveLessonNote } from "../../utils/bookmarksDB.js";
+import { isImageFile } from "../../utils/fileType.js";
 
 const CF_WORKER_URL = `${cloudflareWorkerBaseUrl}/`;
 
@@ -12,6 +13,10 @@ function extractDriveId(url) {
   if (m1) return m1[1];
   const m2 = url.match(/[?&]id=([a-zA-Z0-9_\-]+)/);
   if (m2) return m2[1];
+  const m3 = url.match(/[?&]fileId=([a-zA-Z0-9_\-]+)/);
+  if (m3) return m3[1];
+  const m4 = url.match(/[-\w]{25,}/);
+  if (m4) return m4[0];
   if (/^[a-zA-Z0-9_\-]{25,}$/.test(url.trim())) return url.trim();
   return null;
 }
@@ -44,12 +49,6 @@ function driveEmbedUrl(url) {
 
 function isDriveUrl(url) {
   return url && (url.includes("drive.google.com") || url.includes("docs.google.com/uc"));
-}
-
-function isImageFile(url, mimeType, title) {
-  const imageExtensionRegex = /\.(png|jpe?g|webp|gif|svg)(\?|#|$)/i;
-  const imageMimeRegex = /^image\//i;
-  return (mimeType && imageMimeRegex.test(mimeType)) || (url && imageExtensionRegex.test(url)) || (title && imageExtensionRegex.test(title));
 }
 
 function getOnlineViewUrl(inputUrl, mimeType, title) {
@@ -220,6 +219,7 @@ function getFileMimeType(resource = {}, blob) {
 }
 
 export default function FileViewer({ url, title, T, fileId: providedFileId, onClose, isBlobDirect = false, mimeType = "application/pdf", onStatusChange }) {
+  const isImageResource = isImageFile(url, mimeType, title);
   const [localUrl, setLocalUrl] = useState(isBlobDirect ? url : null);
   const [savedBlob, setSavedBlob] = useState(null);
   const [loading, setLoading] = useState(!isBlobDirect && !navigator.onLine);
@@ -256,6 +256,11 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
     if (e?.preventDefault) e.preventDefault();
     if (e?.stopPropagation) e.stopPropagation();
     if (savePending) return;
+
+    if (isImageResource && !isBlobDirect) {
+      window.open(getOnlineViewUrl(url, mimeType, title), "_blank", "noopener,noreferrer");
+      return;
+    }
 
     setSavePending(true);
 
@@ -306,6 +311,14 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
       setLocalUrl(url);
       setIsSavedOffline(true);
       setLoading(false);
+      return;
+    }
+
+    if (isImageResource) {
+      setLocalUrl(null);
+      setIsSavedOffline(false);
+      setLoading(false);
+      setError(false);
       return;
     }
 
@@ -360,7 +373,7 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [fileId, isBlobDirect, url]);
+  }, [fileId, isBlobDirect, isImageResource, url]);
 
   useEffect(() => {
     setUseIframeFallback(false);
@@ -369,6 +382,10 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
 
   const handleSaveOffline = async () => {
     if (isSavedOffline) return;
+    if (isImageResource && !isBlobDirect) {
+      setSaveFeedback({ type: "warning", text: "⚠️ الصور متاحة للمعاينة أونلاين فقط حالياً." });
+      return;
+    }
     setSaveFeedback(null);
     setIsSaving(true);
 
@@ -449,9 +466,12 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
   };
 
   const isPdf = isPdfMimeType(mimeType) || (typeof title === "string" && title.toLowerCase().endsWith(".pdf"));
-  const isImageContent = !isPdf && isImageFile(url, mimeType, title);
+  const isImageContent = !isPdf && isImageResource;
   const viewUrl = localUrl || getOnlineViewUrl(url, mimeType, title);
-  const imageSrc = localUrl || viewUrl;
+  const imageFileId = extractDriveId(url);
+  const primaryImageUrl = imageFileId ? `${getDirectGoogleImageUrl(imageFileId)}=w1600` : viewUrl;
+  const fallbackImageUrl = imageFileId ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(imageFileId)}&sz=w1600` : viewUrl;
+  const imageSrc = isImageContent && !isBlobDirect ? primaryImageUrl : (localUrl || viewUrl);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 99999, display: "flex", flexDirection: "column" }}>
@@ -543,9 +563,8 @@ export default function FileViewer({ url, title, T, fileId: providedFileId, onCl
               referrerPolicy="no-referrer"
               style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", display: "block", borderRadius: "12px" }}
               onError={(e) => {
-                const fileId = extractDriveId(url);
-                if (fileId && e.target.src === getDirectGoogleImageUrl(fileId)) {
-                  e.target.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+                if (e.target.src !== fallbackImageUrl) {
+                  e.target.src = fallbackImageUrl;
                 }
               }}
             />

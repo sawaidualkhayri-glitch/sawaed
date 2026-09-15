@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isImageFile, isPdfFile } from "../../utils/fileType.js";
 
 export default function ResourceList({ resources, setResources, T, onSave, onAddFileToFolder = null, onAddSubfolderToFolder = null, enableBulkMove = false, dissolveFolderInTree }) {
   const [editIdx, setEditIdx] = useState(null);
@@ -25,8 +26,8 @@ export default function ResourceList({ resources, setResources, T, onSave, onAdd
   const getIcon = (item) => {
     if (!item || typeof item !== "object") return "🔗";
     if (item.type === "folder" || item.isFolder) return "📁";
-    if (item.type === "pdf") return "📄";
-    if (item.type === "image") return "🖼️";
+    if (isImageFile(item, item.mimeType)) return "🖼️";
+    if (isPdfFile(item, item.mimeType)) return "📄";
     return "🔗";
   };
 

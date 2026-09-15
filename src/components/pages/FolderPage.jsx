@@ -4,6 +4,7 @@ import { cloudflareWorkerBaseUrl } from "../../config.js";
 import Modal from "../ui/Modal.jsx";
 import FileViewer from "./FileViewer.jsx";
 import { fetchBinaryBlob } from "../../utils/downloadUtils.js";
+import { isImageFile } from "../../utils/fileType.js";
 
 const CF_WORKER_URL = `${cloudflareWorkerBaseUrl}/`;
 
@@ -939,7 +940,7 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
     return (
       <div key={index} style={{ background: T.card, border: `1.5px solid ${offlineProgress === "done" ? "#23863688" : isOfflineSaved ? "#23863644" : offlineProgress === "error" ? "#e5533344" : T.cardBorder}`, borderRadius: "16px", padding: isMobile ? "12px" : "10px 18px", marginTop: "8px", backdropFilter: "blur(10px)", transition: "border-color 0.3s", display: "flex", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", minHeight: "54px", gap: isMobile ? "10px" : "12px", width: "100%", boxSizing: "border-box", maxWidth: "100%", minWidth: 0, flexDirection: isMobile ? "column" : "row" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: isMobile ? "unset" : 1, width: isMobile ? "100%" : "auto", overflow: "hidden", justifyContent: isMobile ? "center" : "flex-start" }}>
-          <div style={{ fontSize: "24px", flexShrink: 0 }}>{item.type === "pdf" ? "📄" : item.type === "image" ? "🖼️" : "🔗"}</div>
+          <div style={{ fontSize: "24px", flexShrink: 0 }}>{isImageFile(item, item.mimeType) ? "🖼️" : item.type === "pdf" ? "📄" : "🔗"}</div>
           <div style={{ minWidth: 0, overflow: "hidden", flex: 1, width: "100%" }}>
             <p style={{ margin: "0 0 2px", fontWeight: "700", color: T.text, fontSize: isMobile ? "13px" : "14px", whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.title}</p>
             {item.description && <p style={{ margin: 0, fontSize: "11px", color: T.subtext, whiteSpace: isMobile ? "normal" : "nowrap", overflow: "hidden", textOverflow: isMobile ? "clip" : "ellipsis", wordBreak: isMobile ? "break-word" : "normal", textAlign: isMobile ? "center" : "right" }}>{item.description}</p>}

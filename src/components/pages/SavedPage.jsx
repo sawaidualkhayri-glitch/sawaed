@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import FileViewer from "./FileViewer.jsx";
+import { isImageFile, isPdfFile } from "../../utils/fileType.js";
 import { cloudflareWorkerBaseUrl } from "../../config.js";
 import { fetchBinaryBlob } from "../../utils/downloadUtils.js";
 
@@ -150,7 +151,7 @@ export default function SavedPage({ config, T, currentUser, updateUser, idbGetAl
             const offlineSaving = typeof offlinePercent === "number";
             const deviceSaving = typeof devicePercent === "number";
             return <div key={`${fileId}-${index}`} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "16px", padding: "14px", marginBottom: "10px", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", gap: "12px" }}>
-              <div style={{ fontSize: "26px", flexShrink: 0 }}>{item.type?.includes("pdf") || item.title?.toLowerCase().endsWith(".pdf") ? "📄" : "🔗"}</div>
+              <div style={{ fontSize: "26px", flexShrink: 0 }}>{isImageFile(item, item.mimeType) ? "🖼️" : isPdfFile(item, item.mimeType) ? "📄" : "🔗"}</div>
               <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: "0 0 4px", fontWeight: "700", color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || item.name || "ملف محفوظ"}</p><p style={{ margin: 0, fontSize: "12px", color: T.subtext }}>{item.category || item.type || "ملف من المواد"}</p></div>
               {item.url && <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-start" }}><button onClick={() => setViewingFile(item)} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: "pointer", fontFamily: "'Cairo',sans-serif", fontWeight: "600" }}>🌐 أونلاين</button><button onClick={() => saveOffline(item)} disabled={offlineSaving || deviceSaving} style={{ background: T.sectionBg, color: T.accent, border: `1.5px solid ${T.accent}`, borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: offlineSaving || deviceSaving ? "not-allowed" : "pointer", opacity: offlineSaving || deviceSaving ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>{offlineSaving ? `⏳ ${offlinePercent}%` : "⬇️ حفظ للمعاينة أوفلاين"}</button><button onClick={() => saveToDevice(item)} disabled={offlineSaving || deviceSaving} style={{ background: deviceSaving ? "#555" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "7px 12px", fontSize: "12px", cursor: offlineSaving || deviceSaving ? "not-allowed" : "pointer", opacity: offlineSaving || deviceSaving ? 0.65 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>{deviceSaving ? `⏳ ${devicePercent}%` : "💾 حفظ للجهاز"}</button></div>}
               <button onClick={() => toggleStar(item)} aria-label="إزالة من المفضلة" style={{ background: "transparent", border: "none", fontSize: "20px", cursor: "pointer" }}>⭐</button>
