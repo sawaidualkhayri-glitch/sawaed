@@ -8,7 +8,7 @@ const generateUniqueId = (prefix) => `${prefix}_${Date.now()}_${Math.random().to
 
 function processWorkerItem(item) {
   const isFolder = Boolean(
-    item?.isFolder
+    item?.isFolder === true
     || item?.type === "folder"
     || item?.mimeType === "application/vnd.google-apps.folder"
   );
@@ -141,7 +141,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     if (!Array.isArray(items)) return [];
     return items.map(item => {
       if (!item || typeof item !== "object") return item;
-      const isFolder = item.type === "folder" || item.isFolder || item.mimeType === "application/vnd.google-apps.folder";
+      const isFolder = item.type === "folder" || item.isFolder === true || item.mimeType === "application/vnd.google-apps.folder";
       if (isFolder) {
         const rawList = Array.isArray(item.children) ? item.children : Array.isArray(item.items) ? item.items : [];
         const normalizedSub = normalizeItemTree(rawList);
@@ -208,7 +208,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const flattenForV2 = (items, parentId = null, output = []) => {
     (items || []).forEach((item, index) => {
       if (!item || typeof item !== "object") return;
-      const children = item.type === "folder" || item.isFolder ? (item.children || item.items || []) : [];
+      const children = item.type === "folder" || item.isFolder === true ? (item.children || item.items || []) : [];
       const record = { ...item, parentId, rootKey: storageKey, order: index, isFolder: item.type === "folder" || item.isFolder === true };
       delete record.children;
       delete record.items;
@@ -219,16 +219,26 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   };
 
   const rebuildV2Tree = (records) => {
-    const nodes = new Map(records.map(record => [record.id, { ...record, children: [], items: [] }]));
+    const nodes = new Map(records.map(record => {
+      const isFolder = record.type === "folder" || record.isFolder === true;
+      return [record.id, { ...record, ...(isFolder ? { children: [], items: [] } : {}) }];
+    }));
     const roots = [];
     nodes.forEach(node => {
       if (node.parentId && nodes.has(node.parentId)) {
         const parent = nodes.get(node.parentId);
+        if (!Array.isArray(parent.children)) parent.children = [];
         parent.children.push(node);
         parent.items = parent.children;
       } else roots.push(node);
     });
-    const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => { if (item.children?.length) sort(item.children); item.items = item.children; return item; });
+    const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => {
+      if (item.type === "folder" || item.isFolder === true) {
+        if (item.children?.length) sort(item.children);
+        item.items = item.children || [];
+      }
+      return item;
+    });
     return sort(roots);
   };
 

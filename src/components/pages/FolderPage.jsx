@@ -162,7 +162,7 @@ function dissolveFolderInTree(items, folderId) {
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    const isFolder = item?.type === "folder" || item?.isFolder || Array.isArray(item?.children) || Array.isArray(item?.items);
+    const isFolder = item?.type === "folder" || item?.isFolder === true;
     if (isFolder && item?.id === folderId) {
       const children = Array.isArray(item.children) ? item.children : item.items || [];
       return { items: [...items.slice(0, index), ...children, ...items.slice(index + 1)], found: true };
@@ -434,13 +434,13 @@ function getNodeTitle(item) {
 
 function getNodeType(item) {
   if (!item || typeof item !== "object") return "link";
-  if (item.type === "folder" || item.isFolder) return "folder";
+  if (item.type === "folder" || item.isFolder === true) return "folder";
   return item.type || "link";
 }
 
 function hasFolderChildren(item) {
   if (!item || typeof item !== "object") return false;
-  return Boolean(item.type === "folder" || item.isFolder || Array.isArray(item.children) || Array.isArray(item.items));
+  return item.type === "folder" || item.isFolder === true;
 }
 
 function getFolderChildren(item) {
@@ -451,16 +451,26 @@ function getFolderChildren(item) {
 }
 
 function rebuildV2FolderTree(records) {
-  const nodes = new Map((records || []).map(record => [record.id, { ...record, children: [], items: [] }]));
+  const nodes = new Map((records || []).map(record => {
+    const isFolder = record.type === "folder" || record.isFolder === true;
+    return [record.id, { ...record, ...(isFolder ? { children: [], items: [] } : {}) }];
+  }));
   const roots = [];
   nodes.forEach(node => {
     if (node.parentId && nodes.has(node.parentId)) {
       const parent = nodes.get(node.parentId);
+      if (!Array.isArray(parent.children)) parent.children = [];
       parent.children.push(node);
       parent.items = parent.children;
     } else roots.push(node);
   });
-  const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => { if (item.children.length) sort(item.children); item.items = item.children; return item; });
+  const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => {
+    if (item.type === "folder" || item.isFolder === true) {
+      if (item.children.length) sort(item.children);
+      item.items = item.children;
+    }
+    return item;
+  });
   return sort(roots);
 }
 
@@ -905,7 +915,7 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
   };
 
   const renderItem = (item, index, depth = 0) => {
-    if (item && typeof item === "object" && (item.type === "folder" || item.isFolder || Array.isArray(item.items) || Array.isArray(item.children))) {
+    if (item && typeof item === "object" && hasFolderChildren(item)) {
       const folderId = item.id || `${currentPath.join("-") || "root"}-${index}`;
       const children = getFolderChildren(item);
       const isExpanded = expandedFolderIds.has(folderId);
