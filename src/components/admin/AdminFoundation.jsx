@@ -4,6 +4,8 @@ import ResourceList from "./ResourceList.jsx";
 import AddFolderModal from "../modals/AddFolderModal.jsx";
 import AddFileModal from "../modals/AddFileModal.jsx";
 import DriveImportModal from "../modals/DriveImportModal.jsx";
+import IconSelect from "../ui/IconSelect.jsx";
+import { getSubjectIcon, getSectionIcon } from "../../utils/dropdownIcons.js";
 
 const generateUniqueId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -95,6 +97,18 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
     setShowDriveFolderModal(false);
     setDriveFolderName("");
     setDriveFolderUrl("");
+  };
+
+  const handleFoundationSubjectChange = (nextSubject) => {
+    const nextBranches = config.foundationBranches?.[nextSubject] || [];
+    setSelSub(nextSubject);
+    if (nextBranches.length > 0 && !nextBranches.includes(selBranch)) setSelBranch(nextBranches[0]);
+  };
+
+  const handleFoundationTypeChange = (nextType) => {
+    const nextAreas = config.foundationTypes?.[nextType] || [];
+    setSelType(nextType);
+    if (!nextAreas.includes(selArea)) setSelArea(nextAreas[0] || "");
   };
 
   const appendFileToFolderById = (list, folderId, newFile) => {
@@ -203,6 +217,10 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
   const sel = { ...inp };
+  const foundationSubjectOptions = (config.foundationSubjects || []).map(subjectName => ({ value: subjectName, label: subjectName, icon: getSubjectIcon(config, subjectName) }));
+  const foundationBranchOptions = (config.foundationBranches?.[selSub] || []).map(branchName => ({ value: branchName, label: branchName, icon: "🌿" }));
+  const foundationTypeOptions = Object.entries(config.foundationTypes || {}).map(([value, label]) => ({ value, label: value === "electronic" ? "إلكتروني" : value === "inPerson" ? "وجاهي" : label, icon: value === "electronic" ? "💻" : "🏫" }));
+  const foundationAreaOptions = (config.foundationTypes?.[selType] || []).map(areaName => ({ value: areaName, label: areaName, icon: getSectionIcon(areaName) }));
 
   const addFoundationFolder = async () => {
     const name = (newFolderName || "").trim();
@@ -246,17 +264,10 @@ export default function AdminFoundation({ config, saveConfig, T, onBack, normali
 
   return (
     <AdminSection title="محتوى التأسيس" icon="🏗️" T={T} onBack={onBack} onSave={() => {}}>
-      <select value={selSub} onChange={e => setSelSub(e.target.value)} style={sel}>{config.foundationSubjects?.map(s => <option key={s} value={s}>{s}</option>)}</select>
-      <select value={selBranch} onChange={e => setSelBranch(e.target.value)} style={sel}>
-        {(config.foundationBranches?.[selSub] || []).map(b => <option key={b} value={b}>{b}</option>)}
-      </select>
-      <select value={selType} onChange={e => { setSelType(e.target.value); setSelArea((config.foundationTypes?.[e.target.value] || [])[0] || ""); }} style={sel}>
-        <option value="electronic">إلكتروني</option>
-        <option value="inPerson">وجاهي</option>
-      </select>
-      <select value={selArea} onChange={e => setSelArea(e.target.value)} style={sel}>
-        {(config.foundationTypes?.[selType] || []).map(a => <option key={a} value={a}>{a}</option>)}
-      </select>
+      <IconSelect value={selSub} onChange={handleFoundationSubjectChange} options={foundationSubjectOptions} style={sel} ariaLabel="مادة التأسيس" />
+      <IconSelect value={selBranch} onChange={setSelBranch} options={foundationBranchOptions} style={sel} ariaLabel="فرع التأسيس" disabled={!foundationBranchOptions.length} />
+      <IconSelect value={selType} onChange={handleFoundationTypeChange} options={foundationTypeOptions} style={sel} ariaLabel="نوع التأسيس" />
+      <IconSelect value={selArea} onChange={setSelArea} options={foundationAreaOptions} style={sel} ariaLabel="قسم التأسيس" />
       <div style={{ background: T.sectionBg, borderRadius: "14px", padding: "12px", marginBottom: "12px", border: `1px solid ${T.cardBorder}` }}>
         <input value={form.teacher} onChange={e => setForm(f => ({ ...f, teacher: e.target.value }))} placeholder="اسم المدرس (اختياري)" style={inp} />
         <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="العنوان *" style={inp} />

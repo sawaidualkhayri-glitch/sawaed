@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import AdminSection from "./AdminSection.jsx";
 import Modal from "../ui/Modal.jsx";
 import { isImageFile, isPdfFile } from "../../utils/fileType.js";
+import { getSectionIcon, getSubjectIcon } from "../../utils/dropdownIcons.js";
 
 const generateUniqueId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -54,7 +55,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const [selectedGrade, setSelectedGrade] = useState(grades[0] || "");
   const [selectedBranch, setSelectedBranch] = useState(branches[0] || "");
   const [selectedSemester, setSelectedSemester] = useState("فصل أول");
-  const [selectedSubject, setSelectedSubject] = useState("");
+  const [selectedSubject, setSelectedSubjectState] = useState("");
   const [showAddFolderModal, setShowAddFolderModal] = useState(false);
   const [showAddFileModal, setShowAddFileModal] = useState(false);
   const [isAddingFolder, setIsAddingFolder] = useState(false);
@@ -88,15 +89,40 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     ? storedSections
     : storedSections?.[subjectKey]?.[selectedSubject] || defaultSections;
   const sectionsList = rawSectionsList.map(section => typeof section === "string" ? section : section?.name).filter(Boolean);
-  const [selectedSection, setSelectedSection] = useState(sectionsList[0] || "");
+  const [selectedSection, setSelectedSectionState] = useState(sectionsList[0] || "");
+  const previousSubjectRef = useRef(selectedSubject);
+  const setSelectedSubject = (value) => {
+    if (value !== "") setSelectedSubjectState(value);
+  };
+  const setSelectedSection = (value) => {
+    const automaticSubjectReset = value === sectionsList[0]
+      && selectedSection !== value
+      && selectedSubject !== previousSubjectRef.current;
+    if (!automaticSubjectReset) setSelectedSectionState(value);
+  };
   const [subjectGrade, subjectBranch, subjectSemester] = subjectKey.split("_");
   const storageKey = (selectedSubject && selectedSection) ? normalizeFolderKey({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection }) : "";
 
   const availableSubjects = getSubjectsByGradeBranch(config.subjects, selectedGrade, selectedBranch, false);
 
   useEffect(() => {
-    setSelectedSection(current => sectionsList.includes(current) ? current : (sectionsList[0] || ""));
+    const subjectSet = new Set(availableSubjects);
+    const sectionSet = new Set(sectionsList);
+    document.querySelectorAll("select").forEach(select => {
+      select.querySelectorAll("option").forEach(option => {
+        if (subjectSet.has(option.value)) option.textContent = `${getSubjectIcon(config, option.value)} ${option.value}`;
+        if (sectionSet.has(option.value)) option.textContent = `${getSectionIcon(option.value)} ${option.value}`;
+      });
+    });
+  }, [config, availableSubjects.join("|"), sectionsList.join("|"), selectedSubject, selectedSection]);
+
+  useEffect(() => {
+    setSelectedSectionState(current => sectionsList.includes(current) ? current : (sectionsList[0] || ""));
   }, [subjectKey, selectedSubject, JSON.stringify(sectionsList)]);
+
+  useEffect(() => {
+    previousSubjectRef.current = selectedSubject;
+  }, [selectedSubject]);
 
   useEffect(() => {
     const isG11 = canonicalizeGrade(selectedGrade).includes("حادي عشر");
@@ -104,8 +130,8 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   }, [selectedGrade]);
   useEffect(() => {
     if (availableSubjects.length > 0) {
-      if (!availableSubjects.includes(selectedSubject)) { setSelectedSubject(availableSubjects[0]); setSelectedSection(sectionsList[0] || ""); }
-    } else setSelectedSubject("");
+      if (!availableSubjects.includes(selectedSubject)) setSelectedSubject(availableSubjects[0]);
+    } else setSelectedSubjectState("");
   }, [subjectKey, JSON.stringify(availableSubjects)]);
 
   const [folderData, setFolderData] = useState([]);
