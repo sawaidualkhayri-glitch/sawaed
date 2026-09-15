@@ -17,7 +17,7 @@ export default defineConfig({
       srcDir: 'public',
       filename: 'sw.js',
       registerType: 'autoUpdate',
-      injectRegister: 'inline', // إدراج كود التشغيل تلقائياً لحل مشكلة التجميع
+      injectRegister: null,
       includeAssets: ['pdf.worker.min.js', 'icon-192.png', 'icon-512.png'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,mp3,pdf}'], 

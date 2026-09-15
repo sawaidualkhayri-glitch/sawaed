@@ -5,8 +5,8 @@
 import { precacheAndRoute } from "workbox-precaching";
 
 const CACHE_NAME = "sawaed-files-v7";
-const SHELL_CACHE = "sawaed-shell-v7";
-const PDF_RANGE_CACHE = "sawaed-pdf-ranges-v1";
+const SHELL_CACHE = "sawaed-shell-v8";
+const PDF_RANGE_CACHE = "sawaed-pdf-ranges-v2";
 
 precacheAndRoute(self.__WB_MANIFEST);
 
@@ -29,17 +29,22 @@ self.addEventListener("install", (event) => {
       });
     })
   );
-  self.skipWaiting();
 });
 
 // 2. ACTIVATE - تنظيف الكاشات القديمة تلقائياً
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    clients.claim().then(() => caches.keys().then((keys) =>
-      Promise.all(keys
-        .filter((k) => k !== CACHE_NAME && k !== SHELL_CACHE && k !== PDF_RANGE_CACHE)
-        .map((k) => caches.delete(k)))
-    ))
+    caches.keys().then((keys) => Promise.all(keys
+      .filter((key) => (
+        key.startsWith("sawaed-shell-") && key !== SHELL_CACHE
+      ) || (
+        key.startsWith("sawaed-pdf-ranges-") && key !== PDF_RANGE_CACHE
+      ))
+      .map((key) => {
+        console.log("[SW] Deleting old cache:", key);
+        return caches.delete(key);
+      })
+    )).then(() => clients.claim())
   );
 });
 
