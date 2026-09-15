@@ -1,7 +1,8 @@
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
-  signInWithPopup, 
+  signInWithPopup,
+  signInWithRedirect,
   GoogleAuthProvider,
   signOut,
   updateProfile,
@@ -421,6 +422,13 @@ export const deleteEditorAccount = async ({ username, uid }) => {
 // 3. تسجيل الدخول بواسطة Google
 export const loginWithGoogle = async () => {
   const provider = new GoogleAuthProvider();
+  const isMobile = typeof navigator !== "undefined" && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  if (isMobile) {
+    await signInWithRedirect(auth, provider);
+    return null;
+  }
+
   const result = await signInWithPopup(auth, provider);
   const user = result.user;
 

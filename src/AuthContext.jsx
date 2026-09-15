@@ -4,7 +4,7 @@
 
 /* eslint-disable react-refresh/only-export-components */
   import { createContext, useContext, useEffect, useState, useCallback } from "react";
-  import { onAuthStateChanged } from "firebase/auth";
+  import { getRedirectResult, onAuthStateChanged } from "firebase/auth";
   import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
   import { auth, db, isFirebaseConfigured } from "./firebase";
   import { logoutUser } from "./firebaseAuth";
@@ -184,6 +184,17 @@ export function AuthProvider({ children }) {
     };
 
     restoreCachedSession();
+
+    const captureRedirectResult = async () => {
+      try {
+        const redirectResult = await getRedirectResult(auth);
+        if (mounted && redirectResult?.user) setFirebaseUser(redirectResult.user);
+      } catch (error) {
+        console.warn("Failed to restore Google redirect sign-in:", error);
+      }
+    };
+
+    captureRedirectResult();
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
