@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "backup": "node scripts/backup.mjs",
     "migrate:folders": "node scripts/migrate-folder-items-v2.mjs",
     "migrate:folders:apply": "node scripts/migrate-folder-items-v2.mjs --apply",
     "postinstall": "node -e \"const fs=require('fs'); const src='node_modules/pdfjs-dist/build/pdf.worker.min.js'; const dst='public/pdf.worker.min.js'; try { fs.copyFileSync(src,dst); console.log('pdf.worker copied'); } catch(e){ console.warn('postinstall copy failed', e); }\""
