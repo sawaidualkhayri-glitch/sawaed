@@ -49,7 +49,7 @@ function processWorkerItem(item) {
   };
 }
 
-export default function AdminFolders({ config, saveConfig, T, onBack, canonicalizeGrade, canonicalizeBranch, normalizeFolderKey, getFolderKeyCandidates, getSubjectsByGradeBranch, fbGet, fbSet, extractDriveFolderId, cloudflareWorkerBaseUrl, dissolveFolderInTree }) {
+export default function AdminFolders({ config, saveConfig, T, onBack, canonicalizeGrade, canonicalizeBranch, normalizeFolderKey, getFolderKeyCandidates, getSubjectsByGradeBranch, fbGet, fbSet, fbDelete, fbQuery, extractDriveFolderId, cloudflareWorkerBaseUrl, dissolveFolderInTree }) {
   const grades = config.grades || [];
   const branches = config.branches || [];
   const [selectedGrade, setSelectedGrade] = useState(grades[0] || "");
@@ -73,6 +73,7 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const [editItemForm, setEditItemForm] = useState({ title: "", url: "", type: "link" });
   const [expandedFolders, setExpandedFolders] = useState(new Set());
   const [selectedFileIds, setSelectedFileIds] = useState([]);
+  const [usingV2, setUsingV2] = useState(false);
   const defaultSections = ["الرزم", "الكتب", "حلول الكتب", "مواد تعليمية", "ملخصات", "أسئلة واختبارات سابقة", "اختبارات إلكترونية", "عروض تقديمية", "الدراسة للامتحانات", "قنوات يوتيوب شارحة"];
 
   const getSubjectKey = () => {
@@ -204,16 +205,67 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
     setFolderData(nextTree); setSelectedFileIds([]); await saveFolderData(nextTree);
   };
 
+  const flattenForV2 = (items, parentId = null, output = []) => {
+    (items || []).forEach((item, index) => {
+      if (!item || typeof item !== "object") return;
+      const children = item.type === "folder" || item.isFolder ? (item.children || item.items || []) : [];
+      const record = { ...item, parentId, rootKey: storageKey, order: index, isFolder: item.type === "folder" || item.isFolder === true };
+      delete record.children;
+      delete record.items;
+      output.push(record);
+      if (record.isFolder) flattenForV2(children, item.id, output);
+    });
+    return output;
+  };
+
+  const rebuildV2Tree = (records) => {
+    const nodes = new Map(records.map(record => [record.id, { ...record, children: [], items: [] }]));
+    const roots = [];
+    nodes.forEach(node => {
+      if (node.parentId && nodes.has(node.parentId)) {
+        const parent = nodes.get(node.parentId);
+        parent.children.push(node);
+        parent.items = parent.children;
+      } else roots.push(node);
+    });
+    const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => { if (item.children?.length) sort(item.children); item.items = item.children; return item; });
+    return sort(roots);
+  };
+
+  const saveV2Version = async () => {
+    const timestamp = new Date().toISOString();
+    await fbSet("app_metadata", "version", { version: timestamp, lastUpdated: timestamp });
+  };
+
+  const writeV2Record = async (record) => fbSet("folder_items_v2", record.id, record);
+
+  const persistV2Diff = async (previousItems, nextItems) => {
+    const previous = new Map(flattenForV2(previousItems).map(item => [item.id, item]));
+    const next = flattenForV2(nextItems);
+    const nextIds = new Set(next.map(item => item.id));
+    const writes = next.filter(item => JSON.stringify(previous.get(item.id)) !== JSON.stringify(item)).map(writeV2Record);
+    const deletes = [...previous.keys()].filter(id => !nextIds.has(id)).map(id => fbDelete("folder_items_v2", id));
+    await Promise.all([...writes, ...deletes]);
+    await saveV2Version();
+  };
+
   useEffect(() => {
     let cancelled = false;
     const loadFolderData = async () => {
       if (!storageKey) { setFolderData([]); return; }
       try {
+        if (fbQuery) {
+          const v2Items = await fbQuery("folder_items_v2", { where: [{ fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } }] });
+          if (Array.isArray(v2Items) && v2Items.length > 0) {
+            if (!cancelled) { setFolderData(rebuildV2Tree(v2Items)); setUsingV2(true); }
+            return;
+          }
+        }
         const candidateKeys = getFolderKeyCandidates({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection, storageKey });
         for (const candidateKey of candidateKeys) { const fbDoc = await fbGet("folder_items", candidateKey); if (fbDoc && Array.isArray(fbDoc.items)) { const normalized = normalizeItemTree(fbDoc.items); if (!cancelled) setFolderData(normalized); return; } }
       } catch (err) { console.warn("Failed to load global folder_items for AdminFolders:", err); }
       const candidateKeys = getFolderKeyCandidates({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection, storageKey });
-      for (const candidateKey of candidateKeys) { const raw = config[candidateKey]; if (raw) { try { const parsed = typeof raw === "string" ? JSON.parse(raw) : raw; if (!cancelled) setFolderData(normalizeItemTree(parsed)); return; } catch { } } }
+      for (const candidateKey of candidateKeys) { const raw = config[candidateKey]; if (raw) { try { const parsed = typeof raw === "string" ? JSON.parse(raw) : raw; if (!cancelled) { setFolderData(normalizeItemTree(parsed)); setUsingV2(false); } return; } catch { } } }
       if (!cancelled) setFolderData([]);
     };
     loadFolderData(); return () => { cancelled = true; };
@@ -222,10 +274,16 @@ export default function AdminFolders({ config, saveConfig, T, onBack, canonicali
   const saveFolderData = async (newData) => {
     if (!storageKey) return;
     const normalized = normalizeItemTree(newData);
-    const candidateKeys = getFolderKeyCandidates({ grade: subjectGrade || selectedGrade, branch: subjectBranch || selectedBranch, semester: subjectSemester || selectedSemester, subject: selectedSubject, section: selectedSection, storageKey });
-    const newConfig = { ...config }; candidateKeys.forEach(key => { newConfig[key] = JSON.stringify(normalized); });
-    setFolderData(normalized); await saveConfig(newConfig);
-    try { await Promise.all(candidateKeys.map(key => fbSet("folder_items", key, { items: normalized }))); } catch (err) { console.warn("Failed to persist folder_items globally for AdminFolders:", err); }
+    const previous = folderData;
+    if (!usingV2) {
+      const initialRecords = flattenForV2(normalized);
+      await Promise.all(initialRecords.map(writeV2Record));
+      await saveV2Version();
+      setUsingV2(true);
+    } else {
+      await persistV2Diff(previous, normalized);
+    }
+    setFolderData(normalized);
   };
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
   const selectStyle = { ...inp };

@@ -225,16 +225,37 @@ function openDB() {
       reject(new Error("IndexedDB unavailable"));
       return;
     }
-    const req = window.indexedDB.open("sawaed_downloads", 1);
+    const req = window.indexedDB.open("sawaed_downloads", 2);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains("files")) {
         const store = db.createObjectStore("files", { keyPath: "id" });
         store.createIndex("addedAt", "addedAt");
       }
+      if (!db.objectStoreNames.contains("folderTrees")) {
+        db.createObjectStore("folderTrees", { keyPath: "key" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetFolderTree(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("folderTrees", "readonly").objectStore("folderTrees").get(key);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function idbSaveFolderTree(key, version, items) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("folderTrees", "readwrite").objectStore("folderTrees").put({ key, version, items, savedAt: Date.now() });
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => reject(request.error);
   });
 }
 
@@ -429,7 +450,21 @@ function getFolderChildren(item) {
   return [];
 }
 
-export default function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, data, onBack, isEditorSession, editorRole, editorPermissions }) {
+function rebuildV2FolderTree(records) {
+  const nodes = new Map((records || []).map(record => [record.id, { ...record, children: [], items: [] }]));
+  const roots = [];
+  nodes.forEach(node => {
+    if (node.parentId && nodes.has(node.parentId)) {
+      const parent = nodes.get(node.parentId);
+      parent.children.push(node);
+      parent.items = parent.children;
+    } else roots.push(node);
+  });
+  const sort = (items) => items.sort((a, b) => (a.order || 0) - (b.order || 0)).map(item => { if (item.children.length) sort(item.children); item.items = item.children; return item; });
+  return sort(roots);
+}
+
+export default function FolderPage({ config, saveConfig, T, darkMode, currentUser, updateUser, data, onBack, isEditorSession, editorRole, editorPermissions, firestoreGet, fbQuery }) {
   const { subject, grade, branch, semester, section, folderPath = [] } = data;
   const storageKey = normalizeFolderKey({ grade, branch, semester, subject, section });
 
@@ -467,9 +502,41 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
     const loadFolderData = async () => {
       setLoading(true);
       try {
+        const versionDoc = firestoreGet ? await firestoreGet("app_metadata", "version") : null;
+        const remoteVersion = versionDoc?.version || "";
+        if (remoteVersion) {
+          const cachedTree = await idbGetFolderTree(storageKey);
+          if (cachedTree?.version === remoteVersion && Array.isArray(cachedTree.items)) {
+            if (!cancelled) setFolderData(cachedTree.items);
+            return;
+          }
+          if (fbQuery) {
+            const v2Items = await fbQuery("folder_items_v2", { where: [{ fieldFilter: { field: { fieldPath: "rootKey" }, op: "EQUAL", value: { stringValue: storageKey } } }] });
+            if (Array.isArray(v2Items) && v2Items.length > 0) {
+              const tree = rebuildV2FolderTree(v2Items);
+              await idbSaveFolderTree(storageKey, remoteVersion, tree);
+              if (!cancelled) setFolderData(tree);
+              return;
+            }
+          }
+        }
         const variantKeys = getFolderKeyVariants({ grade, branch, semester, subject, section });
+        let parsedItems = [];
+        if (firestoreGet) {
+          for (const candidateKey of [storageKey, ...variantKeys.filter(key => key !== storageKey)]) {
+            try {
+              const legacyDoc = await firestoreGet("folder_items", candidateKey);
+              if (legacyDoc && legacyDoc.items !== undefined) {
+                parsedItems = Array.isArray(legacyDoc.items) ? legacyDoc.items : parseStoredItems(legacyDoc.items);
+                break;
+              }
+            } catch (legacyError) {
+              console.warn("Legacy Firestore folder fallback failed:", legacyError);
+            }
+          }
+        }
         let doc = await fbGet("folder_items", storageKey);
-        if (!doc) {
+        if (!parsedItems.length && !doc) {
           for (const altKey of variantKeys.filter(key => key !== storageKey)) {
             const altDoc = await fbGet("folder_items", altKey);
             if (altDoc) {
@@ -479,8 +546,9 @@ export default function FolderPage({ config, saveConfig, T, darkMode, currentUse
           }
         }
 
-        let parsedItems = [];
-        if (doc && Array.isArray(doc.items)) {
+        if (parsedItems.length) {
+          // The v1 Firestore document was found above.
+        } else if (doc && Array.isArray(doc.items)) {
           parsedItems = doc.items;
         } else if (doc && doc.items !== undefined) {
           parsedItems = parseStoredItems(doc.items);
