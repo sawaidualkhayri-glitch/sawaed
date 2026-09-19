@@ -13,11 +13,16 @@ export default function LegalPageLayout({ eyebrow, title, intro, sections }) {
       <div className="legal-page__glow legal-page__glow--bottom" aria-hidden="true" />
       <div className="legal-page__container">
         <header className="legal-page__header">
+          <div className="legal-page__brand" aria-label="سواعد الخير التعليمية">
+            <div>
+              <strong>سواعد الخير</strong>
+              <span>منصة تعليمية</span>
+            </div>
+          </div>
           <button className="legal-page__home-button" type="button" onClick={goHome}>
             <span aria-hidden="true">←</span>
             العودة إلى الرئيسية
           </button>
-          <div className="legal-page__brand-mark" aria-hidden="true">س</div>
           <p className="legal-page__eyebrow">{eyebrow}</p>
           <h1>{title}</h1>
           <p className="legal-page__intro">{intro}</p>
