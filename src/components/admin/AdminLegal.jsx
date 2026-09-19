@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, onSnapshot, serverTimestamp, updateDoc, writeBatch } from "firebase/firestore";
 import { db } from "../../firebase";
 import AdminSection from "./AdminSection.jsx";
 
@@ -8,6 +8,15 @@ const TYPES = [
   { value: "terms", label: "شروط الخدمة" },
 ];
 const LEGAL_COLLECTION = "legal_documents";
+const DEFAULT_CLAUSES = [
+  { type: "terms", title: "القبول بالشروط", content: "باستخدامك منصة سواعد الخير التعليمية، فإنك توافق على الالتزام بهذه البنود واستخدام المنصة للأغراض التعليمية والشخصية فقط." },
+  { type: "terms", title: "الاستخدام المقبول", content: "تتعهد بعدم تعطيل المنصة أو محاولة الوصول غير المصرح به إلى أنظمتها أو بيانات مستخدميها، وباستخدام محتواها بطريقة مسؤولة وقانونية." },
+  { type: "terms", title: "الملكية الفكرية", content: "المواد التعليمية المتاحة في المنصة مخصصة للدراسة الشخصية، يُمنع نسخها أو إعادة توزيعها أو استخدامها لأغراض تجارية دون إذن مسبق." },
+  { type: "privacy", title: "البيانات التي نجمعها", content: "عند تسجيل الدخول بواسطة Google، نجمع البيانات الأساسية فقط: الاسم الكامل، البريد الإلكتروني، والصورة الشخصية لحسابك." },
+  { type: "privacy", title: "كيفية استخدام البيانات", content: "نستخدم هذه البيانات لإنشاء حسابك الشخصي، وحفظ تقدمك في المادة الدراسية، وتوفير تجربة تعليمية مخصصة." },
+  { type: "privacy", title: "حماية البيانات ومشاركتها", content: "لا نقوم ببيع أو مشاركة بياناتك الشخصية مع أي طرف ثالث أو أطراف إعلانية، ويتم تخزين البيانات بشكل آمن عبر خدمات Google Cloud و Firebase." },
+  { type: "privacy", title: "حذف البيانات والتواصل", content: "يحق للمستخدم طلب حذف حسابه وجميع بياناته المسجلة لدينا في أي وقت من خلال التواصل معنا عبر البريد الإلكتروني: sawaidualkhayri@gmail.com" },
+];
 
 const inputStyle = (T) => ({
   background: T.inputBg,
@@ -77,6 +86,7 @@ export default function AdminLegal({ T, onBack, role }) {
         title,
         content,
         order: visibleClauses.reduce((highest, clause) => Math.max(highest, Number(clause.order || 0)), -1) + 1,
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       setForm({ title: "", content: "" });
@@ -85,6 +95,47 @@ export default function AdminLegal({ T, onBack, role }) {
       if (!denied) console.warn("Failed to add legal clause", saveError);
       setPermissionDenied(denied);
       setError(denied ? "لا تملك صلاحية إضافة البنود في legal_documents." : "تعذر إضافة البند. حاول مرة أخرى.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const seedDefaultClauses = async () => {
+    const existingKeys = new Set(clauses.map((clause) => `${clause.type}:${clause.title.trim()}`));
+    const missingClauses = DEFAULT_CLAUSES.filter((clause) => !existingKeys.has(`${clause.type}:${clause.title}`));
+    if (!missingClauses.length) {
+      setError("البنود الافتراضية موجودة مسبقاً.");
+      return;
+    }
+
+    const hasExistingClauses = clauses.length > 0;
+    const confirmation = hasExistingClauses
+      ? "توجد بنود حالياً. سيتم إضافة البنود الافتراضية الناقصة فقط دون حذف أو استبدال أي بند. هل تريد المتابعة؟"
+      : "هل تريد زرع جميع البنود الافتراضية؟";
+    if (!window.confirm(confirmation)) return;
+
+    setSaving(true);
+    setError("");
+    try {
+      const batch = writeBatch(db);
+      const nextOrderByType = { privacy: 0, terms: 0 };
+      clauses.forEach((clause) => {
+        nextOrderByType[clause.type] = Math.max(nextOrderByType[clause.type], Number(clause.order || 0) + 1);
+      });
+      missingClauses.forEach((clause) => {
+        const clauseRef = doc(collection(db, LEGAL_COLLECTION));
+        batch.set(clauseRef, {
+          ...clause,
+          order: nextOrderByType[clause.type]++,
+          createdAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    } catch (seedError) {
+      const denied = seedError?.code === "permission-denied";
+      if (!denied) console.warn("Failed to seed legal clauses", seedError);
+      setPermissionDenied(denied);
+      setError(denied ? "لا تملك صلاحية زرع البنود في legal_documents." : "تعذر زرع البنود الافتراضية. حاول مرة أخرى.");
     } finally {
       setSaving(false);
     }
@@ -183,6 +234,9 @@ export default function AdminLegal({ T, onBack, role }) {
           <textarea value={form.content} onChange={(event) => updateForm("content", event.target.value)} placeholder="وصف ومحتوى البند" rows={4} style={{ ...fieldStyle, resize: "vertical" }} />
           <button type="button" onClick={addClause} disabled={!canAdd || saving} style={{ background: canAdd && !saving ? `linear-gradient(135deg,${T.accent},${T.accent2})` : "#555", color: "#fff", border: "none", borderRadius: "12px", padding: "12px", fontFamily: "'Cairo',sans-serif", fontWeight: "700", cursor: canAdd && !saving ? "pointer" : "not-allowed", opacity: canAdd ? 1 : 0.65 }}>
             {saving ? "⏳ جارٍ الحفظ..." : "➕ إضافة البند"}
+          </button>
+          <button type="button" onClick={seedDefaultClauses} disabled={saving} style={{ background: "transparent", border: `1px solid ${T.accent}`, color: T.accent, borderRadius: "12px", padding: "11px", fontFamily: "'Cairo',sans-serif", fontWeight: "700", cursor: saving ? "not-allowed" : "pointer" }}>
+            🌱 زرع البنود الافتراضية
           </button>
         </div>
 

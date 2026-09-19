@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../../firebase";
 import "./LegalPages.css";
 
 const SUPPORT_EMAIL = "sawaidualkhayri@gmail.com";
 
-export default function LegalPageLayout({ eyebrow, title, intro, sections, documentType }) {
+export default function LegalPageLayout({ eyebrow, title, intro, documentType }) {
   const [remoteSections, setRemoteSections] = useState(null);
   const [loadingSections, setLoadingSections] = useState(Boolean(documentType));
 
   useEffect(() => {
     if (!documentType) return undefined;
 
-    const unsubscribe = onSnapshot(collection(db, "legal_documents"), (snapshot) => {
+    const legalQuery = query(
+      collection(db, "legal_documents"),
+      where("type", "==", documentType),
+      orderBy("order", "asc"),
+    );
+    const unsubscribe = onSnapshot(legalQuery, (snapshot) => {
       const nextSections = snapshot.docs
         .map((item) => ({ id: item.id, ...item.data() }))
-        .filter((item) => item.type === documentType && item.title?.trim() && item.content?.trim())
-        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .filter((item) => item.title?.trim() && item.content?.trim())
         .map((item) => ({ title: item.title, body: item.content, email: false }));
-      setRemoteSections(nextSections.length > 0 ? nextSections : null);
+      setRemoteSections(nextSections);
       setLoadingSections(false);
     }, () => {
       setRemoteSections(null);
@@ -59,7 +63,7 @@ export default function LegalPageLayout({ eyebrow, title, intro, sections, docum
           </div>
         ) : (
         <div className="legal-page__content">
-          {(remoteSections || sections).map((section) => (
+          {remoteSections?.map((section) => (
             <section className="legal-page__section" key={section.title}>
               <h2>{section.title}</h2>
               <p>{section.body}</p>
@@ -70,6 +74,7 @@ export default function LegalPageLayout({ eyebrow, title, intro, sections, docum
               ) : null}
             </section>
           ))}
+          {!remoteSections?.length ? <p className="legal-page__empty">لا توجد بنود منشورة حالياً.</p> : null}
         </div>
         )}
 
