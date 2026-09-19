@@ -42,6 +42,8 @@ import NewsDetailPage from "./components/pages/NewsDetailPage.jsx";
 import SavedPage from "./components/pages/SavedPage.jsx";
 import StudyTimer, { TimerMiniWidget } from "./components/pages/StudyTimer.jsx";
 import SettingsPage from "./components/pages/SettingsPage.jsx";
+import PrivacyPolicy from "./components/pages/PrivacyPolicy.jsx";
+import TermsOfService from "./components/pages/TermsOfService.jsx";
 import ErrorBoundary from "./components/ui/ErrorBoundary.jsx";
 import AdminSections from "./components/admin/AdminSections.jsx";
 import AdminFolders from "./components/admin/AdminFolders.jsx";
@@ -1414,6 +1416,10 @@ export default function App() {
   const [showTimerModal, setShowTimerModal] = useState(false);
 
   const quote = config.motivationalFixed ? config.motivationalQuotes?.[0] : config.motivationalQuotes?.[quoteIdx];
+  const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+
+  if (publicPath === "/privacy") return <PrivacyPolicy />;
+  if (publicPath === "/terms") return <TermsOfService />;
 
   if (page === "loading" || authLoading || !configLoaded) return <LoadingScreen T={T} />;
   if (page === "splash") return <SplashPage config={config} T={T} onNext={() => setPage("register")} />;
