@@ -18,7 +18,7 @@ if (import.meta.env.DEV && 'serviceWorker' in navigator) {
 if ('serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
+      const registration = await navigator.serviceWorker.register('/sw.js', { type: 'module' });
 
       if (navigator.onLine) {
         registration.update().catch(() => {});

@@ -14,6 +14,7 @@ import AdminLessons from "./AdminLessons.jsx";
 import AdminFoundation from "./AdminFoundation.jsx";
 import AdminSections from "./AdminSections.jsx";
 import AdminFolders from "./AdminFolders.jsx";
+import AdminLegal from "./AdminLegal.jsx";
 
 export default function AdminPanel({ config, saveConfig, T, darkMode, editorRole, editorPermissions, onBack, getSubjectsByGradeBranch, normalizeFoundKey, validateRequiredFields, normalizeDriveFolderInput, extractDriveFolderId, cloudflareWorkerBaseUrl, addFolderToTree, dissolveFolderInTree, getSubjectNames, canonicalizeGrade, canonicalizeBranch, normalizeFolderKey, getFolderKeyCandidates, fbGet, fbSet, fbAdd, fbDelete, fbQuery, getNews, addNewsItem, deleteNewsItem, normalizeNewsItem, formatNewsDate, sendLocalNotification }) {
   const [section, setSection] = useState("main");
@@ -38,6 +39,7 @@ export default function AdminPanel({ config, saveConfig, T, darkMode, editorRole
     { id: "nav", label: "الصفحات والتنقل", icon: "🧭", isAllowed: (currentRole) => ["super_admin", "editor_full"].includes(currentRole) },
     { id: "contact", label: "روابط التواصل", icon: "📞", isAllowed: (currentRole) => ["super_admin", "editor_full", "editor_news"].includes(currentRole) },
     { id: "editors", label: "إدارة المحررين", icon: "🛡️", isAllowed: (currentRole) => ["super_admin", "admin"].includes(currentRole) },
+    { id: "legal", label: "الخصوصية وشروط الخدمة", icon: "⚖️", isAllowed: (currentRole) => currentRole === "super_admin" },
   ];
 
   const isSectionAllowed = (id) => {
@@ -96,6 +98,7 @@ export default function AdminPanel({ config, saveConfig, T, darkMode, editorRole
     if (section === "contact") return <AdminContact config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} />;
     if (section === "password") return <AdminPassword config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} role={role} />;
     if (section === "editors") return <AdminEditors config={config} saveConfig={saveConfig} T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} role={role} />;
+    if (section === "legal") return <AdminLegal T={T} onBack={() => { setActiveSubSection(null); setSection("main"); }} role={role} />;
   }
 
   return (

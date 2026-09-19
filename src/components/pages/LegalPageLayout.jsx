@@ -1,8 +1,33 @@
+import { useEffect, useState } from "react";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "../../firebase";
 import "./LegalPages.css";
 
 const SUPPORT_EMAIL = "sawaidualkhayri@gmail.com";
 
-export default function LegalPageLayout({ eyebrow, title, intro, sections }) {
+export default function LegalPageLayout({ eyebrow, title, intro, sections, documentType }) {
+  const [remoteSections, setRemoteSections] = useState(null);
+  const [loadingSections, setLoadingSections] = useState(Boolean(documentType));
+
+  useEffect(() => {
+    if (!documentType) return undefined;
+
+    const unsubscribe = onSnapshot(collection(db, "legal_documents"), (snapshot) => {
+      const nextSections = snapshot.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .filter((item) => item.type === documentType && item.title?.trim() && item.content?.trim())
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+        .map((item) => ({ title: item.title, body: item.content, email: false }));
+      setRemoteSections(nextSections.length > 0 ? nextSections : null);
+      setLoadingSections(false);
+    }, () => {
+      setRemoteSections(null);
+      setLoadingSections(false);
+    });
+
+    return unsubscribe;
+  }, [documentType]);
+
   const goHome = () => {
     window.location.href = "/";
   };
@@ -28,8 +53,13 @@ export default function LegalPageLayout({ eyebrow, title, intro, sections }) {
           <p className="legal-page__intro">{intro}</p>
         </header>
 
+        {loadingSections ? (
+          <div className="legal-page__content" aria-label="جارٍ تحميل المحتوى">
+            {[1, 2, 3].map((item) => <div className="legal-page__skeleton" key={item} />)}
+          </div>
+        ) : (
         <div className="legal-page__content">
-          {sections.map((section) => (
+          {(remoteSections || sections).map((section) => (
             <section className="legal-page__section" key={section.title}>
               <h2>{section.title}</h2>
               <p>{section.body}</p>
@@ -41,6 +71,7 @@ export default function LegalPageLayout({ eyebrow, title, intro, sections }) {
             </section>
           ))}
         </div>
+        )}
 
         <footer className="legal-page__footer">
           <button className="legal-page__footer-link" type="button" onClick={goHome}>

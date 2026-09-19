@@ -83,10 +83,11 @@
         return null;
       }
 
-      let registration = await navigator.serviceWorker.getRegistration("/");
+      const messagingScope = "/firebase-messaging/";
+      let registration = await navigator.serviceWorker.getRegistration(messagingScope);
       if (!registration) {
-        console.log("[Step 3] Calling navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })");
-        registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+        console.log("[Step 3] Calling navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/firebase-messaging/' })");
+        registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: messagingScope });
         console.log("[Step 3] Registration result:", registration);
       } else {
         console.log("[Step 3] Reusing existing root service worker registration:", registration);

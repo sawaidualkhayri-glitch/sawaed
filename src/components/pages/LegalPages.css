@@ -115,6 +115,20 @@
   gap: 14px;
 }
 
+.legal-page__skeleton {
+  height: 138px;
+  border: 1px solid var(--legal-line);
+  border-radius: 16px;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.04) 30%, rgba(255, 255, 255, 0.11) 50%, rgba(255, 255, 255, 0.04) 70%);
+  background-size: 200% 100%;
+  animation: legal-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes legal-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 .legal-page__section {
   padding: 24px 26px;
   border: 1px solid var(--legal-line);

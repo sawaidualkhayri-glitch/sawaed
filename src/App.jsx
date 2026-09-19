@@ -1171,7 +1171,7 @@ export default function App() {
   // ============================================================
   useEffect(() => {
     if (!("serviceWorker" in navigator) || !firebaseConfig?.projectId) return;
-    navigator.serviceWorker.register("/firebase-messaging-sw.js").catch(() => {});
+    navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/firebase-messaging/" }).catch(() => {});
   }, []);
 
   useEffect(() => {

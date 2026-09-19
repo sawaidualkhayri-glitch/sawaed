@@ -31,6 +31,7 @@ export default function RegisterPage({ config, T, darkMode, appMaxWidth }) {
   const [grade, setGrade] = useState(config.grades?.[0] || "");
   const [branch, setBranch] = useState(config.branches?.[0] || "");
   const [showPw, setShowPw] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -71,6 +72,7 @@ export default function RegisterPage({ config, T, darkMode, appMaxWidth }) {
   };
 
   const registerWithEmail = async () => {
+    if (!acceptedTerms) { setErr("يجب الموافقة على الشروط والأحكام وسياسة الخصوصية أولاً."); return; }
     if (!email.trim()) { setErr("أدخل البريد الإلكتروني."); return; }
     if (!password || password.length < 6) { setErr("كلمة السر قصيرة (6 أحرف+)"); return; }
     if (password !== confirmPassword) { setErr("كلمتا السر غير متطابقتين."); return; }
@@ -159,7 +161,24 @@ export default function RegisterPage({ config, T, darkMode, appMaxWidth }) {
                 {config.branches?.map(b => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
-            <button onClick={registerWithEmail} disabled={loading || !email || !password || !confirmPassword || !grade || !branch} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif" }}>
+            <label style={{ display: "flex", alignItems: "flex-start", gap: "10px", color: T.subtext, fontSize: "13px", lineHeight: "1.8", cursor: "pointer", textAlign: "right" }}>
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={e => { setAcceptedTerms(e.target.checked); setErr(""); }}
+                style={{ width: "18px", height: "18px", marginTop: "4px", flex: "0 0 auto", accentColor: T.accent, cursor: "pointer" }}
+              />
+              <span>
+                أوافق على{" "}
+                <a href="/terms" target="_blank" rel="noreferrer" style={{ color: "#d8b4fe", fontWeight: "600", textDecoration: "underline" }}>
+                  الشروط والأحكام
+                </a>{" "}و{" "}
+                <a href="/privacy" target="_blank" rel="noreferrer" style={{ color: "#d8b4fe", fontWeight: "600", textDecoration: "underline" }}>
+                  سياسة الخصوصية
+                </a>
+              </span>
+            </label>
+            <button onClick={registerWithEmail} disabled={loading || !email || !password || !confirmPassword || !grade || !branch || !acceptedTerms} style={{ background: loading ? "#ccc" : `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "14px", padding: "14px", fontSize: "16px", fontWeight: "700", cursor: loading || !acceptedTerms ? "not-allowed" : "pointer", fontFamily: "'Cairo',sans-serif", opacity: acceptedTerms ? 1 : 0.55 }}>
               {loading ? "⏳ جاري..." : "✅ إنشاء حساب"}
             </button>
             <button onClick={() => setMode("start")} style={{ background: "transparent", border: "none", color: T.subtext, fontSize: "13px", cursor: "pointer", fontFamily: "'Cairo',sans-serif" }}>
