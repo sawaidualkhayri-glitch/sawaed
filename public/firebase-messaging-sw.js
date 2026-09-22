@@ -13,7 +13,9 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
-const notificationIconUrl = new URL('/icon-192.png', self.location.origin).href;
+const notificationIconUrl = 'https://sawaidalkhayri.pages.dev/pwa-192x192.png';
+const notificationBadgeUrl = 'https://sawaidalkhayri.pages.dev/badge-icon.png';
+const notificationFallbackUrl = 'https://sawaidalkhayri.pages.dev/';
 
 messaging.onBackgroundMessage((payload) => {
   const title = payload?.notification?.title || 'إشعار جديد';
@@ -22,8 +24,30 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(title, {
     body,
     icon: notificationIconUrl,
+    badge: notificationBadgeUrl,
+    data: { url: notificationFallbackUrl },
     dir: 'rtl',
     lang: 'ar',
     tag: 'sawaed-fcm',
   });
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const rawTargetUrl = event.notification.data?.url || notificationFallbackUrl;
+  const targetUrl = new URL(rawTargetUrl, notificationFallbackUrl).href;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes('sawaidalkhayri.pages.dev') && 'focus' in client) {
+          return Promise.resolve(client.navigate(targetUrl)).then(() => client.focus());
+        }
+      }
+
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+      return undefined;
+    })
+  );
 });

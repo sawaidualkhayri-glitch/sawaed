@@ -8,6 +8,7 @@ const CACHE_NAME = "sawaed-files-v7";
 const SHELL_CACHE = "sawaed-shell-v8";
 const PDF_RANGE_CACHE = "sawaed-pdf-ranges-v2";
 const notificationIconUrl = new URL("/icon-192.png", self.location.origin).href;
+const notificationFallbackUrl = "https://sawaidalkhayri.pages.dev/";
 
 precacheAndRoute(self.__WB_MANIFEST);
 
@@ -182,6 +183,7 @@ self.addEventListener("message", (event) => {
     self.registration.showNotification(title || "سواعد الخير", {
       body: body || "",
       icon: notificationIconUrl,
+      data: { url: url || notificationFallbackUrl },
       dir: "rtl",
       lang: "ar",
       tag: "sawaed-news",
@@ -191,4 +193,24 @@ self.addEventListener("message", (event) => {
   if (type === "SKIP_WAITING") {
     self.skipWaiting();
   }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const rawTargetUrl = event.notification.data?.url || notificationFallbackUrl;
+  const targetUrl = new URL(rawTargetUrl, notificationFallbackUrl).href;
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes("sawaidalkhayri.pages.dev") && "focus" in client) {
+          return Promise.resolve(client.navigate(targetUrl)).then(() => client.focus());
+        }
+      }
+
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+      return undefined;
+    })
+  );
 });

@@ -116,7 +116,7 @@ function resetNav() {
 function sendLocalNotification(title, body) {
   if (Notification.permission !== "granted") return;
   const icon = new URL("/icon-192.png", window.location.origin).href;
-  const opts = { body, icon, dir: "rtl", lang: "ar" };
+  const opts = { body, icon, data: { url: window.location.href }, dir: "rtl", lang: "ar" };
   if (navigator.serviceWorker.controller) {
     navigator.serviceWorker.ready.then(reg => reg.showNotification(title, opts));
   } else {
