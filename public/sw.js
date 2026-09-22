@@ -7,6 +7,7 @@ import { precacheAndRoute } from "workbox-precaching";
 const CACHE_NAME = "sawaed-files-v7";
 const SHELL_CACHE = "sawaed-shell-v8";
 const PDF_RANGE_CACHE = "sawaed-pdf-ranges-v2";
+const notificationIconUrl = new URL("/icon-192.png", self.location.origin).href;
 
 precacheAndRoute(self.__WB_MANIFEST);
 
@@ -180,8 +181,7 @@ self.addEventListener("message", (event) => {
   if (type === "SHOW_NOTIFICATION") {
     self.registration.showNotification(title || "سواعد الخير", {
       body: body || "",
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      icon: notificationIconUrl,
       dir: "rtl",
       lang: "ar",
       tag: "sawaed-news",

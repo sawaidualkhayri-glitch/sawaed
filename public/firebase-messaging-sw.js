@@ -13,6 +13,7 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const messaging = firebase.messaging();
+const notificationIconUrl = new URL('/icon-192.png', self.location.origin).href;
 
 messaging.onBackgroundMessage((payload) => {
   const title = payload?.notification?.title || 'إشعار جديد';
@@ -20,8 +21,7 @@ messaging.onBackgroundMessage((payload) => {
 
   self.registration.showNotification(title, {
     body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: notificationIconUrl,
     dir: 'rtl',
     lang: 'ar',
     tag: 'sawaed-fcm',

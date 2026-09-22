@@ -1438,7 +1438,7 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Cairo',sans-serif", direction: "rtl", paddingBottom: "80px", boxSizing: "border-box", width: "100%", paddingInline: "16px" }}>
-      <AppNotificationSystem showNotificationPrompt={showNotificationPrompt} dismissNotificationPrompt={dismissNotificationPrompt} requestNotifications={requestNotifications} notificationToast={notificationToast} showUpdateBanner={showUpdateBanner} handleAppUpdate={handleAppUpdate} T={T} />
+      <AppNotificationSystem showNotificationPrompt={showNotificationPrompt} dismissNotificationPrompt={dismissNotificationPrompt} requestNotifications={requestNotifications} notificationToast={notificationToast} setNotificationToast={setNotificationToast} showUpdateBanner={showUpdateBanner} handleAppUpdate={handleAppUpdate} T={T} />
 
       <div style={{ maxWidth: APP_MAX_WIDTH, margin: "0 auto", width: "100%" }}>
         <AppPageTopBar TimerMiniWidget={TimerMiniWidget} showTimerModal={showTimerModal} setShowTimerModal={setShowTimerModal} StudyTimer={StudyTimer} T={T} quote={quote} darkMode={darkMode} />
