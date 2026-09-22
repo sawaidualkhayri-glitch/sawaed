@@ -1175,9 +1175,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!currentUser?.uid || !messaging) return;
+    if (!messaging || typeof Notification === "undefined") return;
     if (Notification.permission !== "granted") return;
-    console.info("Registering FCM token for active user");
+    console.info("Registering FCM token for this browser/device");
     requestFCMToken().catch((err) => {
       console.warn("App-level FCM registration failed:", err);
     });

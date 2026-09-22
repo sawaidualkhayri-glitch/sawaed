@@ -39,6 +39,7 @@ export default function AdminAnnouncements({ config, saveConfig, T, onBack, fbGe
   const [notificationBody, setNotificationBody] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [testStatus, setTestStatus] = useState("");
 
   const safeFbGet = useCallback(async (collectionName, docId) => {
     if (typeof fbGet === "function") return fbGet(collectionName, docId);
@@ -62,6 +63,43 @@ export default function AdminAnnouncements({ config, saveConfig, T, onBack, fbGe
 
   const inp = { background: T.inputBg, border: `1.5px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", fontSize: "13px", color: T.text, width: "100%", outline: "none", fontFamily: "'Cairo',sans-serif", direction: "rtl", boxSizing: "border-box", marginBottom: "8px" };
 
+  const getFcmTokens = async () => {
+    const tokenDocs = await safeFbGet("fcm_tokens");
+    return Array.from(new Set((Array.isArray(tokenDocs) ? tokenDocs : [])
+      .map(doc => typeof doc?.token === "string" ? doc.token.trim() : "")
+      .filter(token => token.length > 0 && token !== "undefined")));
+  };
+
+  const dispatchPush = async (title, body) => {
+    const tokens = await getFcmTokens();
+    if (tokens.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
+
+    const response = await fetch("https://sawaed.hamodemsg.workers.dev/send-notification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, tokens, url: "https://sawaidalkhayri.pages.dev/" }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    return { targeted: result.targeted ?? tokens.length, delivered: result.delivered ?? 0, failed: result.failed ?? 0 };
+  };
+
+  const sendTestPush = async () => {
+    setSending(true);
+    setTestStatus("");
+    try {
+      const result = await dispatchPush("اختبار إشعارات سواعد الخير", "هذه رسالة اختبار لجميع الأجهزة المسجلة.");
+      const status = `تم الاستهداف: ${result.targeted} | تم التسليم إلى FCM: ${result.delivered} | فشل: ${result.failed}`;
+      setTestStatus(status);
+      console.info("[FCM Test Broadcast]", result);
+    } catch (err) {
+      console.error("[FCM Test Broadcast] failed:", err);
+      setTestStatus(`فشل الاختبار: ${err.message}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const sendAnnouncement = async () => {
     const title = notificationTitle.trim();
     if (!title) return;
@@ -71,23 +109,6 @@ export default function AdminAnnouncements({ config, saveConfig, T, onBack, fbGe
       const body = notificationBody.trim();
       const payload = { title, body, createdAt: Date.now() };
       const id = await safeFbAdd("announcements", payload);
-
-      let tokens = [];
-      try {
-        const tokenDocs = await safeFbGet("fcm_tokens");
-        tokens = (Array.isArray(tokenDocs) ? tokenDocs : [])
-          .map(doc => {
-            const raw = typeof doc?.token === "string" ? doc.token : typeof doc?.id === "string" ? doc.id : "";
-            return String(raw ?? "").trim();
-          })
-          .filter(token => typeof token === "string" && token.length > 0 && token !== "undefined");
-
-        const uniqueTokens = Array.from(new Set(tokens));
-        tokens = uniqueTokens;
-      } catch (err) {
-        console.warn("[FCM Dispatch] Failed to load FCM tokens for broadcast; continuing without push recipients.", err);
-        tokens = [];
-      }
 
       if (db) {
         const sentBy = auth?.currentUser?.email || auth?.currentUser?.uid || "admin";
@@ -103,29 +124,8 @@ export default function AdminAnnouncements({ config, saveConfig, T, onBack, fbGe
         });
       }
 
-      if (tokens.length > 0) {
-        const uniqueTokens = Array.from(new Set(tokens.filter(t => typeof t === "string" && t.trim() !== "")));
-        const workerPayload = {
-          title: title.trim(),
-          body: body.trim(),
-          tokens: uniqueTokens,
-        };
-
-        try {
-          const workerRes = await fetch("https://sawaed.hamodemsg.workers.dev/send-notification", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(workerPayload),
-          });
-
-          if (!workerRes.ok) {
-            const workerText = await workerRes.text().catch(() => "");
-            console.warn("[FCM Dispatch] Cloudflare Worker push delivery failed:", workerRes.status, workerText);
-          }
-        } catch (err) {
-          console.warn("[FCM Dispatch] Cloudflare Worker push request failed:", err);
-        }
-      }
+      const dispatchResult = await dispatchPush(title, body);
+      console.info("[FCM Dispatch] broadcast result:", dispatchResult);
 
       if (id) {
         setItems(list => [{ id, ...payload }, ...list]);
@@ -160,6 +160,10 @@ export default function AdminAnnouncements({ config, saveConfig, T, onBack, fbGe
         <button onClick={sendAnnouncement} disabled={sending || !notificationTitle.trim()} style={{ background: `linear-gradient(135deg,${T.accent},${T.accent2})`, color: "#fff", border: "none", borderRadius: "10px", padding: "10px 18px", cursor: sending || !notificationTitle.trim() ? "not-allowed" : "pointer", opacity: sending || !notificationTitle.trim() ? 0.7 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
           {sending ? "⏳ جاري الإرسال..." : sent ? "✅ تم الإرسال!" : "📢 إرسال الآن"}
         </button>
+        <button onClick={sendTestPush} disabled={sending} style={{ marginInlineStart: "8px", background: T.sectionBg, color: T.text, border: `1px solid ${T.cardBorder}`, borderRadius: "10px", padding: "10px 18px", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.7 : 1, fontFamily: "'Cairo',sans-serif", fontWeight: "700" }}>
+          🧪 إرسال اختبار لكل الأجهزة
+        </button>
+        {testStatus && <div role="status" style={{ color: T.subtext, fontSize: "12px", marginTop: "10px" }}>{testStatus}</div>}
       </div>
       {items.map(a => (
         <div key={a.id} style={{ background: T.card, border: `1px solid ${T.cardBorder}`, borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", display: "flex", gap: "10px", alignItems: "center" }}>

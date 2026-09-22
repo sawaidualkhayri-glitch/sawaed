@@ -25,7 +25,7 @@ messaging.onBackgroundMessage((payload) => {
     body,
     icon: notificationIconUrl,
     badge: notificationBadgeUrl,
-    data: { url: notificationFallbackUrl },
+    data: { ...(payload?.data || {}), url: payload?.data?.url || notificationFallbackUrl },
     dir: 'rtl',
     lang: 'ar',
     tag: 'sawaed-fcm',
